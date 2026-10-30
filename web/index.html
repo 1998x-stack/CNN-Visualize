@@ -1,0 +1,85 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <meta name="theme-color" content="#f7f8fc" />
+  <title>CNN Visualize — Watch a neural network learn</title>
+  <link rel="stylesheet" href="/app.css" />
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
+  <header class="topbar">
+    <a class="identity" href="/" aria-label="CNN Visualize 首页">
+      <span class="symbol"><span></span><span></span><span></span></span>
+      <span>CNN<span class="identity-light"> / VISUALIZE</span></span>
+    </a>
+    <div class="toplinks"><a href="#journey">学习历程</a><a href="#layers">神经网络内部</a><a href="#science">研究说明</a></div>
+    <div class="header-right"><span class="status"><i></i> MODEL CONNECTED</span><a class="header-github" href="https://github.com/1998x-stack/CNN-Visualize" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></div>
+  </header>
+  <main class="page">
+    <section class="hero">
+      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.1</span></div>
+        <h1>Watch intelligence<br /><span>take shape.</span></h1>
+        <p>打开神经网络的黑箱。选择一张图像，穿越训练时间，观察模型如何从随机猜测，逐渐学会识别世界。</p>
+        <div class="hero-pills"><span>◈ 真实训练检查点</span><span>◌ 逐层特征演化</span><span>⌁ 可解释性实验</span></div>
+      </div>
+      <div class="hero-visual" aria-hidden="true">
+        <div class="orb-ring ring-a"></div><div class="orb-ring ring-b"></div><div class="orb-ring ring-c"></div>
+        <div class="orb-core"><div class="core-light"></div></div>
+        <div class="orbit-note note-a">LAYER 01 <strong>Edges</strong></div><div class="orbit-note note-b">LAYER 03 <strong>Meaning</strong></div>
+      </div>
+    </section>
+    <div id="toast" role="status" aria-live="polite"></div>
+    <section class="workspace" id="journey" aria-label="模型训练实验室">
+      <div class="workspace-top"><div class="workspace-heading"><span class="live-dot"></span><div><div class="tiny-label">ACTIVE EXPERIMENT</div><h2 id="run-title">Loading experiment…</h2></div></div><div class="run-facts"><div><span>DATASET</span><b id="dataset-name">—</b></div><div><span>EPOCHS</span><b id="epochs-count">—</b></div><div><span>VALIDATION</span><b id="val-acc">—</b></div></div></div>
+      <div class="dashboard-grid">
+        <aside class="samples-panel panel">
+          <div class="panel-heading"><div><span class="tiny-label">01 / INPUT</span><h3>Choose an image<span class="muted-dot">.</span></h3></div><span class="count" id="sample-count">—</span></div>
+          <p class="panel-description">从验证集选取一张图片，追踪它在整个训练过程中的命运。</p>
+          <div class="upload-area" id="drop-zone" tabindex="0" role="button" aria-label="上传自定义图片">
+            <div class="upload-symbol">↥</div><div><strong>添加自己的图片</strong><span>拖拽至此，或点击上传</span></div><input id="upload-file" type="file" accept="image/png,image/jpeg,image/webp,image/bmp" hidden />
+          </div>
+          <div class="collection-head"><span>VALIDATION SAMPLES</span><span id="gallery-label">10 CLASSES</span></div>
+          <div class="gallery" id="gallery" aria-label="图片选择列表"></div>
+          <div class="sidebar-note"><div class="note-icon">i</div><p>演示数据采用真实的手写数字。彩色图像实验可通过 CIFAR-10 单独训练。</p></div>
+        </aside>
+        <div class="main-column">
+          <section class="inspection panel" aria-label="输入图片和归因区域">
+            <div class="panel-heading inspection-head"><div><span class="tiny-label">02 / INSPECT</span><h3>What does it see<span class="muted-dot">?</span></h3></div><span class="mode-tag" id="view-kind">ORIGINAL INPUT</span></div>
+            <div class="visual-stage"><div class="stage-grid"></div><div class="image-display"><div class="image-halo"></div><img id="input-main" alt="当前选择的原始图片" /><img id="overlay-main" alt="模型解释热力图叠加层" /></div><div class="stage-caption"><span class="stage-circle"></span><span id="stage-explainer">这是模型实际接收的输入图像。</span></div><span class="resolution">16 × 16 MODEL INPUT</span></div>
+            <div class="view-controls" role="group" aria-label="可视化模式">
+              <button class="view-tab selected" data-view="original">原图</button>
+              <button class="view-tab" data-view="gradcam">Grad-CAM</button>
+              <button class="view-tab" data-view="saliency">Saliency</button>
+              <button class="view-tab" data-view="occlusion">Occlusion</button>
+              <button class="view-tab" data-view="deconv">DeconvNet</button>
+            </div>
+            <div class="opacity-control"><span>Overlay intensity</span><input id="opacity" type="range" min="10" max="100" value="75" aria-label="热力图透明度" /><span id="opacity-value">75%</span></div>
+          </section>
+          <section class="timeline panel" aria-label="训练时间轴">
+            <div class="panel-heading"><div><span class="tiny-label">03 / TIME TRAVEL</span><h3>The learning journey<span class="muted-dot">.</span></h3></div><button class="icon-button" id="reset-time" title="回到 Epoch 0" aria-label="回到 Epoch 0">↺</button></div>
+            <div class="epoch-display"><div><span>CHECKPOINT</span><strong>Epoch <em id="current-epoch">00</em></strong></div><div class="epoch-meta"><span id="training-state">随机初始化</span><span class="epoch-divider">/</span><span id="total-epochs">00</span></div></div>
+            <div class="timeline-controls"><button class="play-button" id="play" aria-label="播放训练历程"><span id="play-icon">▶</span></button><input type="range" id="epoch-slider" min="0" max="10" step="1" value="0" aria-label="选择 Epoch" /><button class="step-button" id="next-epoch" title="下一轮">→</button></div>
+            <div class="timeline-numbers"><span>UNTRAINED</span><span id="end-epoch">EPOCH 10</span></div>
+            <div class="trajectory"><div class="trajectory-top"><span>TRUE-CLASS CONFIDENCE</span><strong id="trajectory-value">—</strong></div><svg id="trajectory-chart" viewBox="0 0 540 105" role="img" aria-label="所选图片真实类别置信度随训练改变的曲线" preserveAspectRatio="none"></svg></div>
+            <div class="checkpoint-insight" id="epoch-insight">正在加载训练历程…</div>
+          </section>
+        </div>
+        <aside class="right-column">
+          <section class="prediction panel"><div class="panel-heading"><div><span class="tiny-label">04 / PREDICTION</span><h3>Model's belief<span class="muted-dot">.</span></h3></div><span id="correct-badge" class="outcome">—</span></div><div class="prediction-big"><span>THE MODEL PREDICTS</span><strong id="predicted-label">—</strong><div class="confidence-line"><strong id="confidence">—</strong><span>confidence</span></div></div><div class="thin-divider"></div><div class="prob-title">CLASS PROBABILITIES <span>TOP 5</span></div><div id="probabilities" class="prob-list"></div><div class="true-label">Actual label <strong id="actual-label">—</strong></div></section>
+          <section class="learning-curve panel"><div class="panel-heading"><div><span class="tiny-label">05 / OPTIMIZATION</span><h3>Learning curves<span class="muted-dot">.</span></h3></div></div><div class="metrics-legend"><span><i class="legend-blue"></i> Train loss</span><span><i class="legend-pink"></i> Val loss</span></div><svg id="loss-chart" viewBox="0 0 300 130" role="img" aria-label="训练和验证损失随 Epoch 的变化"></svg><div class="metrics-bottom"><div><span>TRAIN ACCURACY</span><strong id="train-accuracy">—</strong></div><div><span>VAL ACCURACY</span><strong id="val-accuracy">—</strong></div></div></section>
+          <section class="detail-note panel"><span class="tiny-label">RESEARCH NOTE</span><h3>Visualization ≠ explanation.</h3><p>清晰的特征图不等于模型真正依赖该区域。用 Occlusion 进行干预对照，才能进一步检验解释是否忠实。</p><a href="https://arxiv.org/abs/1311.2901" target="_blank" rel="noopener noreferrer">READ THE ORIGINAL PAPER ↗</a></section>
+        </aside>
+      </div>
+    </section>
+    <section class="layers-section" id="layers">
+      <div class="section-intro"><span class="tiny-label">BEYOND THE OUTPUT</span><h2>Step inside the <em>network.</em></h2><p>从滤波器到特征激活。选择任意卷积层与通道，并移动 Epoch，亲眼看见抽象特征逐渐形成。</p></div>
+      <div class="layers-grid"><div class="feature-browser panel"><div class="panel-heading"><div><span class="tiny-label">06 / FEATURE EXPLORER</span><h3>Activation atlas<span class="muted-dot">.</span></h3></div><span class="small-counter" id="channel-count">—</span></div><div class="layer-tabs"><button data-layer="1" class="layer-button selected"><b>01</b> Early patterns</button><button data-layer="2" class="layer-button"><b>02</b> Composition</button><button data-layer="3" class="layer-button"><b>03</b> High-level</button></div><div class="feature-description" id="feature-explanation">第一层往往学习边缘、亮度和局部纹理。</div><div id="feature-grid" class="feature-grid"></div><div class="feature-footer"><span>SELECTED CHANNEL <strong id="selected-channel">00</strong></span><span id="feature-size">—</span></div></div>
+      <div class="feature-details"><div class="reconstruction panel"><div class="panel-heading"><div><span class="tiny-label">07 / REVERSE PROJECT</span><h3>Feature → Pixels<span class="muted-dot">.</span></h3></div></div><div class="science-tiles"><div class="science-tile"><div class="tile-heading">LEARNED FILTER</div><img id="filter-image" alt="当前通道的卷积核平均权重（带正负号）" /><p>卷积权重 · 正负值映射</p></div><div class="science-tile"><div class="tile-heading">DECONV PROJECTION</div><img id="deconv-image" alt="DeconvNet 将当前特征峰值逆向投影到输入像素空间" /><p>选定单峰激活 · 逆向投影</p></div></div><div class="activation-metrics"><div><span>MEAN ACTIVATION</span><strong id="activation-mean">—</strong></div><div><span>ZERO FRACTION</span><strong id="activation-sparsity">—</strong></div></div></div><div class="explain panel"><span class="tiny-label">HOW TO READ IT</span><h3 id="interpretation-title">从像素到边缘。</h3><p id="interpretation-text">卷积核逐步响应局部笔画。选择不同通道，观察它们是否具有不同的模式偏好。</p><div class="explain-divider"></div><div class="formula">z<sub>l</sub> = W<sub>l</sub> * a<sub>l-1</sub> + b<sub>l</sub></div><p class="formula-desc">DeconvNet 显示的是选中激活的投影，不代表模型对某一类别的完整归因。</p></div></div></div>
+    </section>
+    <footer id="science"><div class="footer-top"><div class="footer-mark">CV<span>·</span></div><p>Make learning visible.<br />Make explanations testable.</p><a href="#journey">BACK TO EXPERIMENT ↑</a></div><div class="footer-bottom"><span>BASED ON ZEILER & FERGUS · ECCV 2014</span><span>REAL CHECKPOINTS · OPEN RESEARCH · BUILT FOR CURIOSITY</span></div></footer>
+  </main>
+</body>
+</html>
