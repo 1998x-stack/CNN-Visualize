@@ -165,6 +165,42 @@ def trajectory(sample_id: str):
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
+@app.get("/api/channel-trajectory")
+def channel_trajectory(sample_id: str, layer: int = Query(1, ge=1, le=3),
+                       channel: int = Query(0, ge=0)):
+    """Absolute channel statistics across *real* checkpoints for the same input.
+
+    Unlike per-image normalized heatmaps, mean activations here can be compared
+    numerically across epochs, because all checkpoints share one model lineage.
+    """
+    try:
+        meta, _, _ = context()
+        tensor, _ = sample_tensor(sample_id)
+        history = []
+        prev = None
+        with torch.no_grad():
+            for epoch in range(meta["epochs"] + 1):
+                model = checkpoint(epoch)
+                _, trace = model.forward_trace(tensor)
+                feature = trace["features"][layer - 1]
+                if channel >= feature.shape[1]:
+                    raise ValueError("Channel out of range")
+                active = feature[0, channel]
+                filter_weights = (model.conv1, model.conv2, model.conv3)[layer - 1].weight[channel]
+                drift = 0.0 if prev is None else float((active - prev).square().mean().sqrt())
+                history.append({"epoch": epoch, "mean": round(float(active.mean()), 6),
+                                "max": round(float(active.max()), 6),
+                                "sparsity": round(float((active == 0).float().mean()), 6),
+                                "activation_rms_change": round(drift, 6),
+                                "filter_l2": round(float(filter_weights.norm()), 6)})
+                prev = active
+        return {"sample_id": sample_id, "layer": layer, "channel": channel,
+                "history": history,
+                "note": "Absolute mean and RMS difference (same spatial grid/channel across checkpoints). Not heatmap-normalized."}
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
 @app.get("/api/inspect")
 def inspect(sample_id: str, epoch: int = Query(0, ge=0),
             layer: int = Query(1, ge=1, le=3), channel: int = Query(0, ge=0)):

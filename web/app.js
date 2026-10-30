@@ -4,7 +4,7 @@ const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
 const state = { manifest: null, sample: null, epoch: 0, layer: 1, channel: 0,
   mode: 'original', info: null, trajectory: null, timer: null, requestId: 0,
-  samples: [], pinned: null };
+  samples: [], pinned: null, channelJourney: null, channelJourneyKey: null };
 const layerText = {
   1: ['Early patterns', '第一层开始响应局部笔画、亮度和方向模式。', '从像素到边缘。', '卷积核学习局部亮暗差异。观察不同通道是否偏好横线、竖线或角点。'],
   2: ['Compositions', '第二层结合局部形状，形成更大的笔画、交叉与弯曲模式。', '组合成结构。', '前层的激活成为新层输入。对比不同 Epoch，观察响应是否集中在更明确的字符部件。'],
@@ -44,7 +44,7 @@ function renderGallery(){
   }
 }
 async function selectSample(sample){
-  stopPlayback();state.sample=sample;state.channel=0;state.pinned=null;
+  stopPlayback();state.sample=sample;state.channel=0;state.pinned=null;state.channelJourneyKey=null;
   renderGallery();setText('#actual-label',sample.label_index===null?'Unknown':sample.label);
   const id=sample.id;setText('#epoch-insight','正在计算每轮 Checkpoint 对这张图片的预测…');
   try{
@@ -59,7 +59,7 @@ function updateEpoch(epoch){
   $('#epoch-slider').value=state.epoch;
   setText('#current-epoch',String(state.epoch).padStart(2,'0'));
   setText('#training-state',state.epoch===0?'随机初始化':'训练后模型');
-  renderTrajectory();renderLoss();updateInsight();loadInspect();
+  renderTrajectory();renderLoss();renderChannelJourney();updateInsight();loadInspect();
 }
 async function loadInspect(){
   if(!state.sample||!state.manifest)return;
@@ -99,7 +99,7 @@ function renderInspection(){
     const caption=createNode('span');caption.textContent='CH '+String(i).padStart(2,'0');
     btn.append(img,caption);btn.addEventListener('click',()=>{state.channel=i;loadInspect()});grid.append(btn);
   });
-  renderMode();updateInsight();
+  renderMode();updateInsight();loadChannelJourney();
 }
 function renderMode(){
   if(!state.info)return;
@@ -152,6 +152,34 @@ function renderLoss(){
   $('#loss-chart').innerHTML=`<line x1="12" y1="64" x2="288" y2="64" stroke="#edf0f8" stroke-dasharray="3 5"/><line x1="12" y1="116" x2="288" y2="116" stroke="#edf0f8"/><path d="${path('train_loss')}" fill="none" stroke="#7485e6" stroke-width="2.4" stroke-linecap="round"/><path d="${path('val_loss')}" fill="none" stroke="#e1a3b0" stroke-width="2.4" stroke-linecap="round"/><line x1="${x}" y1="6" x2="${x}" y2="116" stroke="#a0aad5" stroke-dasharray="3 4"/>`;
   setText('#train-accuracy',pct(m[state.epoch]?.train_acc));
   setText('#val-accuracy',pct(m[state.epoch]?.val_acc));
+  setText('#gradient-norm',fmt(m[state.epoch]?.grad_norm,3));
+  setText('#weight-delta',fmt(m[state.epoch]?.weight_delta,3));
+}
+
+async function loadChannelJourney(){
+  if(!state.sample||!state.manifest)return;
+  const {id}=state.sample,layer=state.layer,channel=state.channel;
+  const key=`${id}:${layer}:${channel}`;
+  if(state.channelJourneyKey===key)return;
+  state.channelJourneyKey=key;state.channelJourney=null;
+  setText('#channel-current','…');
+  try{
+    const data=await api(`/api/channel-trajectory?sample_id=${encodeURIComponent(id)}&layer=${layer}&channel=${channel}`);
+    if(state.channelJourneyKey!==key)return;
+    state.channelJourney=data;renderChannelJourney();
+  }catch(e){if(state.channelJourneyKey===key)notify(e.message)}
+}
+function renderChannelJourney(){
+  const obj=state.channelJourney;if(!obj||!obj.history.length)return;
+  const arr=obj.history.map(x=>x.mean),w=540,h=90,pad=8;
+  const high=Math.max(...arr,1e-6)*1.08;
+  const xCoord=i=>pad+i*(w-2*pad)/Math.max(arr.length-1,1);
+  const yCoord=v=>h-pad-(v/high)*(h-2*pad);
+  const d=arr.map((v,i)=>`${i===0?'M':'L'} ${xCoord(i).toFixed(2)} ${yCoord(v).toFixed(2)}`).join(' ');
+  const curr=obj.history[state.epoch]??obj.history.at(-1);
+  const x=xCoord(curr.epoch),y=yCoord(curr.mean);
+  $('#channel-chart').innerHTML=`<path d="M ${pad} ${h-pad} L ${w-pad} ${h-pad}" stroke="#e5e9f7"/><path d="${d}" fill="none" stroke="#8a84df" stroke-width="2.7" stroke-linejoin="round" stroke-linecap="round"/><line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="#9faae1" stroke-dasharray="3 4"/><circle cx="${x}" cy="${y}" r="5" fill="#fff" stroke="#857ee1" stroke-width="3"/>`;
+  setText('#channel-current',fmt(curr.mean,4));setText('#activation-drift',fmt(curr.activation_rms_change,4));
 }
 function chooseLayer(layer){state.layer=layer;state.channel=0;$$('.layer-button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.layer)===layer));
   setText('#feature-explanation',layerText[layer][1]);setText('#interpretation-title',layerText[layer][2]);setText('#interpretation-text',layerText[layer][3]);loadInspect()}

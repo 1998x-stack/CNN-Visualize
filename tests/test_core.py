@@ -56,6 +56,10 @@ def test_training_checkpoints_and_api(experiment):
     sample = data['samples'][0]['id']
     trajectory = client.get('/api/trajectory',params={'sample_id':sample}).json()
     assert len(trajectory['evolution']) == 3
+    channel_track = client.get('/api/channel-trajectory',params={'sample_id':sample,'layer':2,'channel':3})
+    assert channel_track.status_code == 200
+    assert len(channel_track.json()['history']) == 3
+    assert channel_track.json()['history'][0]['activation_rms_change'] == 0.0
     inspected = client.get('/api/inspect',params={'sample_id':sample,'epoch':2,'layer':2,'channel':3})
     assert inspected.status_code==200, inspected.text
     info = inspected.json()

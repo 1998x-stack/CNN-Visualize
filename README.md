@@ -22,7 +22,9 @@ Open **http://127.0.0.1:8000/**. On first launch after cloning you **must genera
 2. Drag the **Epoch timeline** or press Play to load weights from the *actual checkpoint*. Epoch 0 is a randomly initialized, untrained network.
 3. Explore the classification probabilities, predicted class, per-image true-class probability trajectory, training/validation loss and accuracy.
 4. Toggle four separate explanations: **input saliency**, **Grad-CAM**, **occlusion sensitivity** (4×4 zero patch on a 16×16 input), and **DeconvNet projection** (single peak activation, stored MaxPool switches, positive backward rectification and transposed convolution).
-5. Switch among **three convolutional layers** and select any channel in the activation atlas. See the learned filter, selected feature activation, projected pixel pattern, mean and sparsity.
+5. Switch among **three convolutional layers** and select any channel in the activation atlas. See the learned filter, selected feature activation, projected pixel pattern, mean, sparsity and **cross-epoch channel learning curve with RMS activation drift**.
+
+The detailed visual design and scientific interpretation specification is in [`docs/VISUALIZATION-SYSTEM.md`](docs/VISUALIZATION-SYSTEM.md).
 
 **Important distinction:** the Epoch playback replays stored training checkpoints; it does not visualize individual optimizer steps. Grad-CAM and saliency are class-conditional for the **current predicted class**. DeconvNet does **not** establish class attribution. Colors are normalized **per image**, so they support qualitative spatial comparison but **not** quantitative heatmap intensity comparisons across epochs; rely on numeric activation means for that.
 
@@ -73,6 +75,7 @@ tests/          # Model, API, upload and reproducibility smoke tests
 | `/api/manifest` | GET | Run metadata, loss curves, gallery images |
 | `/api/trajectory?sample_id=...` | GET | Per-Epoch probabilities for one input |
 | `/api/inspect?sample_id=...&epoch=...&layer=...&channel=...` | GET | Real intermediate activations and explanation images |
+| `/api/channel-trajectory?sample_id=...&layer=...&channel=...` | GET | Absolute channel activation stats and RMS change across all checkpoints |
 | `/api/upload` | POST | Upload ≤5MB image as multipart field `file` |
 
 ## Scientific roadmap
