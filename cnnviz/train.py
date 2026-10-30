@@ -43,7 +43,7 @@ def run_training(*, dataset: str = "digits", epochs: int = 10,
     metrics = []
 
     def snapshot(epoch: int, train_loss: float | None, train_acc: float | None,
-                 grad_norm: float | None, previous: dict | None) -> None:
+                 grad_stats: dict | None, previous: dict | None) -> None:
         model.eval()
         total_loss = total_correct = count = 0
         with torch.no_grad():
@@ -59,32 +59,42 @@ def run_training(*, dataset: str = "digits", epochs: int = 10,
         metrics.append({"epoch": epoch, "train_loss": train_loss, "train_acc": train_acc,
                         "val_loss": round(total_loss / max(count, 1), 6),
                         "val_acc": round(total_correct / max(count, 1), 6),
-                        "grad_norm": grad_norm, "weight_delta": round(delta, 6)})
+                        "grad_norm": None if grad_stats is None else grad_stats["last"],
+                        "grad_norm_mean": None if grad_stats is None else grad_stats["mean"],
+                        "grad_norm_max": None if grad_stats is None else grad_stats["max"],
+                        "grad_norm_last": None if grad_stats is None else grad_stats["last"],
+                        "grad_norm_batches": None if grad_stats is None else grad_stats["batches"],
+                        "weight_delta": round(delta, 6)})
         print(f"epoch {epoch:02d}/{epochs} | val accuracy {metrics[-1]['val_acc']:.1%} | loss {metrics[-1]['val_loss']:.4f}", flush=True)
 
     snapshot(0, None, None, None, None)
     for epoch in range(1, epochs + 1):
         previous = {k: v.detach().clone() for k, v in model.state_dict().items()}
         model.train()
-        running_loss = running_correct = running_total = last_norm = 0
+        running_loss = running_correct = running_total = 0
+        grad_norms = []
         for xb, yb in loader:
             optimizer.zero_grad(set_to_none=True)
             prediction = model(xb)
             loss = nn.functional.cross_entropy(prediction, yb)
             loss.backward()
-            last_norm = float(nn.utils.clip_grad_norm_(model.parameters(), 5))
+            grad_norms.append(float(nn.utils.clip_grad_norm_(model.parameters(), 5)))
             optimizer.step()
             running_loss += float(loss.detach()) * len(xb)
             running_correct += int((prediction.argmax(1) == yb).sum())
             running_total += len(xb)
         snapshot(epoch, round(running_loss / running_total, 6),
-                 round(running_correct / running_total, 6), round(last_norm, 6), previous)
+                 round(running_correct / running_total, 6),
+                 {"mean": round(float(np.mean(grad_norms)), 6),
+                  "max": round(max(grad_norms), 6),
+                  "last": round(grad_norms[-1], 6), "batches": len(grad_norms)}, previous)
 
     manifest = {"run_id": f"{dataset}-seed{seed}-e{epochs}", "dataset": dataset,
                 "source": source, "classes": labels, "channels": channels,
                 "model": "InspectableCNN", "input_size": [16, 16],
                 "train_count": len(train_ids), "validation_count": len(val_ids),
                 "seed": seed, "epochs": epochs, "metrics": metrics, "samples": samples,
+                "gradient_norm_definition": "Global L2 norm before clipping (clip threshold=5), mean/max/last over minibatches",
                 "notes": ["Every checkpoint is a real trained PyTorch state_dict, including epoch 0 (random initialization).",
                           "Gallery samples belong to the held-out validation/test split.",
                           "DeconvNet projects one peak activation and does not prove class attribution."]}

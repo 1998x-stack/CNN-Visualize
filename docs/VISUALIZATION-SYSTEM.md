@@ -105,3 +105,82 @@ No training happens on page load. The browser requests saved checkpoint-derived 
 - scikit-learn Digits dataset — https://scikit-learn.org/stable/modules/generated/sklearn.datasets.load_digits.html
 - torchvision CIFAR-10 — https://docs.pytorch.org/vision/stable/generated/torchvision.datasets.CIFAR10.html
 - PyTorch MaxUnpool2d — https://docs.pytorch.org/docs/stable/generated/torch.nn.MaxUnpool2d.html
+
+## 8. V0.2.1 + V0.2.2: controlled comparisons (implemented)
+
+### Fixed-class explanation
+
+The browser **locks `target_class` at sample selection**: a gallery sample uses
+its known ground-truth class; an unlabeled upload uses its epoch-0 predicted
+class and is clearly labeled as such. The dropdown can lock any other class.
+Prediction always shows the checkpoint argmax separately. Requests include
+`target_class` so saliency, Grad-CAM, occlusion and the confidence timeline
+all refer to the *same fixed class*. The old `/api/inspect` behavior remains
+available if the query parameter is omitted: explain the currently predicted
+class; it is not appropriate for temporal interpretation.
+
+### Fixed activation color scale
+
+By default feature-map atlas uses `scale_mode=fixed` with range:
+
+    low = 0; high = max over {all checkpoints, all channels, same image, same layer}
+
+The server computes the scale from real post-ReLU activation tensors and
+caches the scalar (`maxsize=96`). A Fixed range is shared by atlas tiles,
+selected channel and both endpoints in the comparison. In Local mode, each
+map is stretched independently to reveal weak structures; **Local colors
+must never be compared across time**. The selected mode and numerical bounds
+are returned by `/api/inspect` and `/api/compare`.
+
+The signed B−A difference is always displayed on a **separate, zero-centered
+symmetric palette with constant ±layer scale**, including when endpoints use
+Local stretching. `delta_mean`, `rms_difference`, `l1_mean_difference`,
+`cosine_similarity` and `max_absolute_difference` are computed from original
+tensors before rendering; cosine is null if either map has zero norm.
+
+The fixed scale is *per sample and per layer*, not a universal dataset-wide
+scale. Only compare heatmap intensities **within this scope**. Activations
+are nonnegative post-ReLU. Signed differences mean relative change, not
+signed input gradients or causal effects.
+
+### New API and contract
+
+- `GET /api/inspect?sample_id=...&epoch=...&layer=...&channel=...&target_class=3&scale_mode=fixed`
+  returns class-bound attributions, actual predictions and atlas heatmaps.
+- `GET /api/compare?sample_id=...&epoch_a=0&epoch_b=8&layer=2&channel=4&scale_mode=fixed`
+  returns common-scale A/B PNGs, difference PNG and raw numerical comparisons.
+- Training metrics now include `grad_norm_mean`, `grad_norm_max`,
+  `grad_norm_last`, `grad_norm_batches` and the definition in the manifest.
+  All values are **global pre-clipping L2 norms** over minibatches; old
+  `grad_norm` remains an alias of the last batch for compatibility.
+  Old artifacts without `grad_norm_mean` are visibly labeled `LEGACY`.
+
+### Async and model-cache correctness
+
+All sample selections invalidate outstanding trajectory, inspection,
+channel-trajectory and comparison work *synchronously*, with request aborts,
+monotonic generations and matching identifiers before rendering. Epoch,
+channel, class and scale changes likewise protect their respective views.
+On a state transition, stale images and metrics are cleared rather than
+mislabelled as belonging to the newly selected checkpoint. Duplicate
+A/B requests are deduplicated via a comparison state key.
+
+Cached PyTorch model weights **must not be first created inside
+`torch.inference_mode()`** because those tensors cannot later be saved for
+backpropagation when computing class explanations. Comparison code therefore
+uses `torch.no_grad()` instead; a regression test performs comparison before
+attribution after clearing the cache.
+
+### Verification
+
+- `pytest -q` includes mathematical A/B checks against directly computed
+  activation tensors, fixed-color checks, class-target and backward compatibility,
+  gradient aggregation and cache-after-inference regression cases.
+- `node --check web/app.js` validates frontend syntax.
+- `python tests/browser_smoke.py` (optional Playwright + system Chromium) uses
+  the actual FastAPI in-process TestClient as the API source, checks fixed
+  class, Local toggle, A/B selectors, layer switch, rapid sample-switch
+  consistency, JavaScript errors and mobile overflow without opening local HTTP.
+- Still **epoch checkpoints**, not per optimizer step. No rigorous
+  paper-faithful ZFNet deconvolution numeric parity or attribution fidelity
+  certification yet.

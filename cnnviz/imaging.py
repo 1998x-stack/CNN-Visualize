@@ -28,14 +28,16 @@ def normalize(t: torch.Tensor | np.ndarray, low: float | None = None, high: floa
     return np.clip((a - lo) / (hi - lo), 0, 1)
 
 
-def heatmap(t: torch.Tensor | np.ndarray, signed: bool = False, upscale: int = 8) -> str:
+def heatmap(t: torch.Tensor | np.ndarray, signed: bool = False, upscale: int = 8,
+            low: float | None = None, high: float | None = None,
+            signed_limit: float | None = None) -> str:
     a = t.detach().cpu().numpy() if isinstance(t, torch.Tensor) else np.asarray(t)
     if signed:
-        scale = max(float(np.max(np.abs(a))), 1e-9)
+        scale = max(float(np.max(np.abs(a))) if signed_limit is None else signed_limit, 1e-9)
         v = np.clip(a / scale, -1, 1)
         rgb = np.stack([242 - 135 * np.maximum(-v, 0), 242 - 175 * np.abs(v), 242 - 125 * np.maximum(v, 0)], axis=-1)
     else:
-        v = normalize(a)
+        v = normalize(a, low=low, high=high)
         # ink-blue → periwinkle → warm coral, high contrast on a white UI
         keys = np.array([[15, 23, 42], [54, 85, 160], [128, 112, 221], [239, 142, 136], [255, 221, 177]])
         tscaled = v * (len(keys) - 1)

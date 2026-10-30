@@ -15,13 +15,14 @@ from PIL import Image, ImageOps, UnidentifiedImageError
 import torch
 from torch.nn import functional as F
 
+from .comparison import ActivationScale, compare_activation, render_activation
 from .data import get_dataset
 from .imaging import heatmap, input_image, normalize, resized_heat
 from .model import InspectableCNN, deconv_projection
 
 ROOT = Path(__file__).resolve().parent.parent
 ARTIFACT_DIR = Path(os.getenv("CNNVIZ_ARTIFACTS", str(ROOT / "artifacts" / "demo")))
-app = FastAPI(title="CNN Visualize · Learning Journey", version="0.1.0")
+app = FastAPI(title="CNN Visualize · Learning Journey", version="0.2.2")
 _uploaded: dict[str, torch.Tensor] = {}
 _upload_lock = Lock()
 
@@ -66,26 +67,51 @@ def sample_tensor(sample_id: str):
     return data[index:index + 1], int(targets[index])
 
 
-def render_feature_map(feature: torch.Tensor) -> str:
-    return heatmap(feature, upscale=max(6, 128 // feature.shape[-1]))
+@lru_cache(maxsize=96)
+def fixed_activation_scale(sample_id: str, layer: int) -> ActivationScale:
+    """One deterministic color domain for sample/layer across all channels/epochs.
+
+    Cache is bounded and only contains scale values, never uploaded pixels.
+    Re-run the server if a training artifact is replaced in place.
+    """
+    manifest, _, _ = context()
+    tensor, _ = sample_tensor(sample_id)
+    maximum = 0.0
+    with torch.no_grad():
+        for epoch in range(manifest["epochs"] + 1):
+            _, trace = checkpoint(epoch).forward_trace(tensor)
+            maximum = max(maximum, float(trace["features"][layer - 1].max()))
+    return ActivationScale(low=0.0, high=max(maximum, 1e-9))
 
 
-def explanation(sample_id: str, epoch: int, layer: int, channel: int):
+def render_feature_map(feature: torch.Tensor, *, scale: ActivationScale, mode: str) -> str:
+    return render_activation(feature, scale=scale, mode=mode,
+                             upscale=max(6, 128 // feature.shape[-1]))
+
+
+def explanation(sample_id: str, epoch: int, layer: int, channel: int,
+                target_class: int | None = None, scale_mode: str = "fixed"):
     if layer not in (1, 2, 3):
         raise ValueError("Layer must be 1,2,3")
+    if scale_mode not in ("fixed", "local"):
+        raise ValueError("scale_mode must be fixed or local")
     model = checkpoint(epoch)
     tensor, target = sample_tensor(sample_id)
     x = tensor.detach().clone().requires_grad_(True)
     logits, trace = model.forward_trace(x)
     probs = logits.softmax(1)[0]
     predicted = int(probs.argmax())
+    if target_class is not None and not (0 <= target_class < probs.shape[0]):
+        raise ValueError("Target class out of range")
+    attribution_target = predicted if target_class is None else int(target_class)
     maps = trace["features"][layer - 1]
     if channel < 0 or channel >= maps.shape[1]:
         raise ValueError("Channel out of range")
-    # Class-conditional derivatives use predicted score, not the supplied label.
+    # Every attribution below is conditioned on the *same explicit* target.
+    # Predictions and accuracy remain based on actual argmax, independently.
     last = trace["features"][-1]
     last.retain_grad()
-    logits[0, predicted].backward()
+    logits[0, attribution_target].backward()
     grad = x.grad.detach().abs()[0].amax(dim=0)
     weights = last.grad.detach().mean(dim=(2, 3), keepdim=True)
     cam = F.relu((weights * last.detach()).sum(dim=1))[0]
@@ -94,30 +120,37 @@ def explanation(sample_id: str, epoch: int, layer: int, channel: int):
         projected = deconv_projection(model, trace, layer, channel)[0].mean(dim=0)
         selected_conv = (model.conv1, model.conv2, model.conv3)[layer - 1]
         kernel = selected_conv.weight[channel].detach().mean(dim=0)
-        # One 4x4 mask per position: batched, avoids 49 sequential model runs.
         positions = [(r, c) for r in range(0, 13, 2) for c in range(0, 13, 2)]
         blocked = x.detach().repeat(len(positions), 1, 1, 1)
         for i, (r, c) in enumerate(positions):
             blocked[i, :, r:r + 4, c:c + 4] = 0.0
-        shifted = model(blocked).softmax(1)[:, predicted]
-        drop = (probs[predicted].detach() - shifted).cpu().numpy()
+        shifted = model(blocked).softmax(1)[:, attribution_target]
+        drop = (probs[attribution_target].detach() - shifted).cpu().numpy()
         occlusion = np.zeros((16, 16), dtype="float32")
         counts = np.zeros_like(occlusion)
         for (r, c), value in zip(positions, drop):
             occlusion[r:r + 4, c:c + 4] += float(value)
             counts[r:r + 4, c:c + 4] += 1
         occlusion /= np.maximum(counts, 1)
-        occlusion = np.maximum(occlusion, 0)  # only probability decreases are emphasized
+        occlusion = np.maximum(occlusion, 0)
+    scale = fixed_activation_scale(sample_id, layer) if scale_mode == "fixed" else ActivationScale(0, 1, "per_tile_dynamic")
     active = maps[0, channel].detach()
     top = torch.topk(probs, k=min(5, len(probs)))
     return {"sample_id": sample_id, "epoch": epoch, "layer": layer, "channel": channel,
-            "true_class": target, "predicted_class": predicted, "confidence": round(float(probs[predicted].detach()), 6),
+            "true_class": target, "predicted_class": predicted,
+            "attribution_target_class": attribution_target,
+            "attribution_target_probability": round(float(probs[attribution_target].detach()), 6),
+            "attribution_mode": "predicted" if target_class is None else "fixed",
+            "confidence": round(float(probs[predicted].detach()), 6),
             "correct": None if target is None else bool(target == predicted),
             "probabilities": [round(float(v), 6) for v in probs.detach()],
             "top_predictions": [{"index": int(k), "probability": round(float(v.detach()), 6)} for k, v in zip(top.indices, top.values)],
             "input": input_image(tensor[0]),
-            "feature_maps": [render_feature_map(feat) for feat in maps[0].detach()],
-            "feature": render_feature_map(active), "filter": heatmap(kernel, signed=True, upscale=24),
+            "feature_maps": [render_feature_map(feat, scale=scale, mode=scale_mode) for feat in maps[0].detach()],
+            "feature": render_feature_map(active, scale=scale, mode=scale_mode),
+            "feature_scale": scale.as_dict() if scale_mode == "fixed" else {"scope": "per_tile_dynamic"},
+            "scale_mode": scale_mode,
+            "filter": heatmap(kernel, signed=True, upscale=24),
             "deconv": heatmap(projected, signed=True, upscale=12),
             "saliency": heatmap(grad, upscale=12), "gradcam": heatmap(cam, upscale=12),
             "occlusion": heatmap(occlusion, upscale=12),
@@ -125,9 +158,34 @@ def explanation(sample_id: str, epoch: int, layer: int, channel: int):
             "activation_max": round(float(active.max()), 6),
             "activation_sparsity": round(float((active == 0).float().mean()), 6),
             "feature_shape": list(maps.shape[1:]),
-            "warnings": {"deconv": "Single-peak feature projection, not a class attribution or true image reconstruction.",
-                         "gradcam": "Class-conditional map for the currently predicted class.",
-                         "occlusion": "16x16 input, 4x4 zero patch with stride 2; values are probability decreases."}}
+            "warnings": {"deconv": "Single-peak feature projection, not a class attribution or true reconstruction.",
+                         "gradcam": "Class-conditional on attribution_target_class; overlay is per-image normalized and not quantitative across epochs.",
+                         "occlusion": "16x16 input, 4x4 zero patch stride 2; positive probability drops for attribution_target_class.",
+                         "feature": "Fixed: common [0,max] over every epoch/channel for the selected sample and layer; Local: each tile rescaled separately."}}
+
+
+def comparison(sample_id: str, epoch_a: int, epoch_b: int, layer: int, channel: int,
+               scale_mode: str = "fixed"):
+    if layer not in (1, 2, 3) or scale_mode not in ("fixed", "local"):
+        raise ValueError("Invalid layer or scale mode")
+    tensor, _ = sample_tensor(sample_id)
+    with torch.no_grad():
+        _, trace_a = checkpoint(epoch_a).forward_trace(tensor)
+        _, trace_b = checkpoint(epoch_b).forward_trace(tensor)
+        channels = trace_a["features"][layer - 1].shape[1]
+        if not (0 <= channel < channels):
+            raise ValueError("Channel out of range")
+        a = trace_a["features"][layer - 1][0, channel]
+        b = trace_b["features"][layer - 1][0, channel]
+        scale = fixed_activation_scale(sample_id, layer)
+        stats = compare_activation(a, b, scale)
+        return {"sample_id": sample_id, "layer": layer, "channel": channel,
+                "epoch_a": epoch_a, "epoch_b": epoch_b, "scale_mode": scale_mode,
+                "scale": scale.as_dict() if scale_mode == "fixed" else {"scope": "per_tile_dynamic"},
+                "a": render_feature_map(a, scale=scale, mode=scale_mode),
+                "b": render_feature_map(b, scale=scale, mode=scale_mode),
+                **stats,
+                "note": "B−A on the same sample, layer and channel; signed difference is fixed to ±layer max. No causal claim."}
 
 
 @app.get("/api/health")
@@ -203,9 +261,21 @@ def channel_trajectory(sample_id: str, layer: int = Query(1, ge=1, le=3),
 
 @app.get("/api/inspect")
 def inspect(sample_id: str, epoch: int = Query(0, ge=0),
-            layer: int = Query(1, ge=1, le=3), channel: int = Query(0, ge=0)):
+            layer: int = Query(1, ge=1, le=3), channel: int = Query(0, ge=0),
+            target_class: int | None = Query(None, ge=0),
+            scale_mode: str = Query("fixed", pattern="^(fixed|local)$")):
     try:
-        return explanation(sample_id, epoch, layer, channel)
+        return explanation(sample_id, epoch, layer, channel, target_class, scale_mode)
+    except (ValueError, RuntimeError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+
+@app.get("/api/compare")
+def compare(sample_id: str, epoch_a: int = Query(0, ge=0), epoch_b: int = Query(0, ge=0),
+            layer: int = Query(1, ge=1, le=3), channel: int = Query(0, ge=0),
+            scale_mode: str = Query("fixed", pattern="^(fixed|local)$")):
+    try:
+        return comparison(sample_id, epoch_a, epoch_b, layer, channel, scale_mode)
     except (ValueError, RuntimeError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
 

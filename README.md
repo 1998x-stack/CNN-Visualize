@@ -91,3 +91,24 @@ tests/          # Model, API, upload and reproducibility smoke tests
 ```bash
 pytest -q
 ```
+
+## V0.2.2 — controlled temporal microscope
+
+- Lock any target class across epochs (gallery defaults to its true label;
+  unlabeled upload defaults to its Epoch-0 predicted class). Predictions remain
+  independent; attribution heatmaps target the locked class.
+- Fixed, quantitative color domains for the same sample/layer across all
+  saved epochs and channels; optional Local contrast expansion **only for
+  visual inspection**, never intensity comparisons.
+- A/B Epoch inspector with common-scale feature maps, fixed signed B−A
+  difference and raw RMS/mean/L1/cosine statistics.
+- Cancellable / generation-guarded browser requests and reset placeholders;
+  cached model inference safe for subsequent autograd attributions.
+- Mean/max/last global gradient norms captured over every minibatch, all
+  measured **before gradient clipping**. Legacy manifest values are labelled.
+
+Run `pytest -q` and `node --check web/app.js`. With Python Playwright and
+Chromium installed, run `python tests/browser_smoke.py` for a headless browser
+regression on the real in-process FastAPI results (no live HTTP required).
+See [docs/VISUALIZATION-SYSTEM.md](docs/VISUALIZATION-SYSTEM.md) for the
+color-scale scope, API semantics and scientific limitations.

@@ -4,7 +4,9 @@ const $ = (q) => document.querySelector(q);
 const $$ = (q) => [...document.querySelectorAll(q)];
 const state = { manifest: null, sample: null, epoch: 0, layer: 1, channel: 0,
   mode: 'original', info: null, trajectory: null, timer: null, requestId: 0,
-  samples: [], pinned: null, channelJourney: null, channelJourneyKey: null };
+  samples: [], pinned: null, channelJourney: null, channelJourneyKey: null,
+  targetClass: null, scaleMode: 'fixed', epochA: 0, epochB: 10, compareInfo: null, compareKey: null,
+  controllers: {}, sampleRevision: 0, compareRevision: 0 };
 const layerText = {
   1: ['Early patterns', '第一层开始响应局部笔画、亮度和方向模式。', '从像素到边缘。', '卷积核学习局部亮暗差异。观察不同通道是否偏好横线、竖线或角点。'],
   2: ['Compositions', '第二层结合局部形状，形成更大的笔画、交叉与弯曲模式。', '组合成结构。', '前层的激活成为新层输入。对比不同 Epoch，观察响应是否集中在更明确的字符部件。'],
@@ -12,9 +14,9 @@ const layerText = {
 };
 const modes = {
   original: ['ORIGINAL INPUT','这是模型实际接收的 16×16 图像；训练集原始分辨率可能不同。'],
-  gradcam: ['GRAD-CAM','当前预测类别对应的最后卷积层梯度加权区域；热力图是放大后的估计。'],
-  saliency: ['SALIENCY','当前预测类别的输入梯度幅值；高响应不等于严格的因果重要性。'],
-  occlusion: ['OCCLUSION','用 4×4 黑色遮挡块扫描输入，亮色表示该位置遮挡使预测概率下降较多。'],
+  gradcam: ['GRAD-CAM','固定目标类别对应的最后卷积层梯度加权区域。归因热图本身逐帧归一化，不可用颜色比较绝对值。'],
+  saliency: ['SALIENCY','固定目标类别 Logit 的输入梯度幅值；颜色逐帧归一化，不是因果重要性。'],
+  occlusion: ['OCCLUSION','对固定目标类别进行 4×4 零值遮挡。亮色表示该类别概率下降；热图逐帧归一化。'],
   deconv: ['DECONVNET','选择一个通道的最大激活，再通过 Switch Unpool 与转置卷积投影回像素。']
 };
 function notify(msg){const el=$('#toast');el.textContent=msg;el.style.display='block';clearTimeout(notify._t);notify._t=setTimeout(()=>el.style.display='none',4700)}
@@ -23,6 +25,52 @@ function pct(v,d=1){return v===null||v===undefined?'—':(v*100).toFixed(d)+'%'}
 async function api(path,opts){const res=await fetch(path,opts);let obj;try{obj=await res.json()}catch{throw new Error('无法解析服务器响应')};if(!res.ok)throw new Error(obj.detail||'请求失败');return obj}
 function setText(q,value){const el=$(q);if(el)el.textContent=value}
 function createNode(type,cl){const x=document.createElement(type);if(cl)x.className=cl;return x}
+function cancelRequest(key){state.controllers[key]?.abort();const controller=new AbortController();state.controllers[key]=controller;return controller.signal}
+function abandonRequests(){for(const key of ['trajectory','inspect','channel','compare'])cancelRequest(key);state.requestId++;state.compareRevision++;}
+function isAbort(error){return error?.name==='AbortError'}
+function clearComparisonDisplay(){
+  for(const name of ['#compare-a-image','#compare-b-image','#compare-diff-image'])$(name).removeAttribute('src');
+  for(const name of ['#compare-rms','#compare-mean','#compare-cosine','#compare-scale-label'])setText(name,'…');
+}
+function clearInspectionDisplay(){
+  state.info=null;
+  for(const name of ['#overlay-main','#filter-image','#deconv-image'])$(name).removeAttribute('src');
+  $('#overlay-main').style.opacity=0;
+  $('#feature-grid').replaceChildren();
+  setText('#predicted-label','…');setText('#confidence','…');setText('#channel-count','…');
+  setText('#feature-size','…');
+}
+
+function targetProbability(row){return row.probabilities[state.targetClass]}
+function populateTargetClasses(){
+  const selector=$('#target-class');selector.replaceChildren();
+  state.manifest.classes.forEach((name,index)=>{const o=createNode('option');o.value=index;o.textContent=`${index} · ${name}`;selector.append(o)});
+  if(state.targetClass!==null)selector.value=state.targetClass;
+}
+function populateCompareEpochs(){
+  for(const id of ['#epoch-a','#epoch-b']){
+    const el=$(id);el.replaceChildren();
+    for(let epoch=0;epoch<=state.manifest.epochs;epoch++){
+      const option=createNode('option');option.value=epoch;option.textContent=`Epoch ${String(epoch).padStart(2,'0')}`;el.append(option);
+    }
+  }
+  state.epochA=0;state.epochB=state.manifest.epochs;renderCompareControls();
+}
+function renderCompareControls(){
+  $('#epoch-a').value=state.epochA;$('#epoch-b').value=state.epochB;
+  setText('#epoch-a-label','EPOCH '+String(state.epochA).padStart(2,'0'));
+  setText('#epoch-b-label','EPOCH '+String(state.epochB).padStart(2,'0'));
+}
+function setTargetClass(value){
+  state.targetClass=Number(value);$('#target-class').value=state.targetClass;
+  setText('#target-note',`锁定类别「${state.manifest.classes[state.targetClass]}」；真实预测独立展示。`);
+  renderTrajectory();updateInsight();loadInspect();
+}
+function changeScaleMode(value){
+  state.scaleMode=value;setText('#feature-scale-label',value==='fixed'?'固定：[0, 同一样本/层所有 Epoch 与通道的最大值]':'Local：每张图单独拉伸，颜色不可用于跨 Epoch 比较');
+  loadInspect();loadCompare();
+}
+
 function showManifest(meta){
   state.manifest=meta;state.samples=[...meta.samples];
   setText('#run-title',meta.run_id);setText('#dataset-name',meta.dataset.toUpperCase());
@@ -30,7 +78,7 @@ function showManifest(meta){
   setText('#end-epoch','EPOCH '+meta.epochs);setText('#val-acc',pct(meta.metrics.at(-1).val_acc));
   setText('#gallery-label',meta.classes.length+' CLASSES');$('#epoch-slider').max=meta.epochs;
   setText('#sample-count',meta.samples.length+' IMAGES');
-  renderGallery();renderLoss();
+  renderGallery();renderLoss();populateTargetClasses();populateCompareEpochs();
 }
 function renderGallery(){
   const parent=$('#gallery');parent.replaceChildren();
@@ -44,33 +92,46 @@ function renderGallery(){
   }
 }
 async function selectSample(sample){
-  stopPlayback();state.sample=sample;state.channel=0;state.pinned=null;state.channelJourneyKey=null;
+  stopPlayback();abandonRequests();const revision=++state.sampleRevision;
+  state.sample=sample;state.channel=0;state.pinned=null;state.channelJourneyKey=null;
+  state.trajectory=null;state.info=null;state.compareInfo=null;state.compareKey=null;state.channelJourney=null;
+  state.targetClass=sample.label_index===null?null:Number(sample.label_index);
+  clearInspectionDisplay();clearComparisonDisplay();$('#input-main').src=sample.image;
   renderGallery();setText('#actual-label',sample.label_index===null?'Unknown':sample.label);
-  const id=sample.id;setText('#epoch-insight','正在计算每轮 Checkpoint 对这张图片的预测…');
+  setText('#epoch-insight','正在计算每轮 Checkpoint 对这张图片的预测…');
+  setText('#predicted-label','…');setText('#compare-rms','…');setText('#channel-current','…');
+  const id=sample.id,signal=cancelRequest('trajectory');
   try{
-    const journey=await api('/api/trajectory?sample_id='+encodeURIComponent(id));
-    if(state.sample?.id!==id)return;
-    state.trajectory=journey;renderTrajectory();await loadInspect();
-  }catch(e){notify(e.message)}
+    const journey=await api('/api/trajectory?sample_id='+encodeURIComponent(id),{signal});
+    if(state.sampleRevision!==revision||state.sample?.id!==id)return;
+    state.trajectory=journey;
+    // For an unlabeled upload, explicitly lock the Epoch-0 prediction (not a changing argmax).
+    if(state.targetClass===null)state.targetClass=journey.evolution[0].predicted_class;
+    setTargetClass(state.targetClass);
+  }catch(e){if(!isAbort(e)&&state.sampleRevision===revision)notify(e.message)}
 }
+
 function updateEpoch(epoch){
   if(!state.manifest)return;
   state.epoch=Math.max(0,Math.min(state.manifest.epochs,Number(epoch)));
   $('#epoch-slider').value=state.epoch;
   setText('#current-epoch',String(state.epoch).padStart(2,'0'));
   setText('#training-state',state.epoch===0?'随机初始化':'训练后模型');
-  renderTrajectory();renderLoss();renderChannelJourney();updateInsight();loadInspect();
+  renderTrajectory();renderLoss();renderChannelJourney();updateInsight();if(state.targetClass!==null)loadInspect();
 }
 async function loadInspect(){
-  if(!state.sample||!state.manifest)return;
+  if(!state.sample||!state.manifest||state.targetClass===null)return;
   const requestId=++state.requestId;
-  const {id}=state.sample;const epoch=state.epoch,layer=state.layer,channel=state.channel;
+  const {id}=state.sample,epoch=state.epoch,layer=state.layer,channel=state.channel;
+  const target=state.targetClass,scale=state.scaleMode;
+  const signal=cancelRequest('inspect');clearInspectionDisplay();
   try{
-    const data=await api(`/api/inspect?sample_id=${encodeURIComponent(id)}&epoch=${epoch}&layer=${layer}&channel=${channel}`);
-    if(requestId!==state.requestId)return;
+    const data=await api(`/api/inspect?sample_id=${encodeURIComponent(id)}&epoch=${epoch}&layer=${layer}&channel=${channel}&target_class=${target}&scale_mode=${scale}`,{signal});
+    if(requestId!==state.requestId||state.sample?.id!==id||state.targetClass!==target)return;
     state.info=data;renderInspection();
-  }catch(e){if(requestId===state.requestId)notify(e.message)}
+  }catch(e){if(!isAbort(e)&&requestId===state.requestId)notify(e.message)}
 }
+
 function renderInspection(){
   const info=state.info,meta=state.manifest;if(!info)return;
   $('#input-main').src=info.input;
@@ -83,6 +144,7 @@ function renderInspection(){
   setText('#activation-mean',fmt(info.activation_mean,3));
   setText('#activation-sparsity',pct(info.activation_sparsity,0));
   $('#filter-image').src=info.filter;$('#deconv-image').src=info.deconv;
+  if(info.scale_mode==='fixed')setText('#feature-scale-label',`Fixed · ${fmt(info.feature_scale.low,3)}–${fmt(info.feature_scale.high,3)} (全通道 / 全 Epoch)`);
   const probs=$('#probabilities');probs.replaceChildren();
   for(const item of info.top_predictions){
     const row=createNode('div','prob-item');
@@ -97,34 +159,32 @@ function renderInspection(){
     btn.setAttribute('aria-pressed',i===state.channel?'true':'false');
     const img=createNode('img');img.src=src;img.alt=`特征图 ${i}`;
     const caption=createNode('span');caption.textContent='CH '+String(i).padStart(2,'0');
-    btn.append(img,caption);btn.addEventListener('click',()=>{state.channel=i;loadInspect()});grid.append(btn);
+    btn.append(img,caption);btn.addEventListener('click',()=>selectChannel(i));grid.append(btn);
   });
-  renderMode();updateInsight();loadChannelJourney();
+  renderMode();updateInsight();loadChannelJourney();loadCompare();
 }
 function renderMode(){
   if(!state.info)return;
   const info=state.info,mode=state.mode;
   $('#view-kind').textContent=modes[mode][0];
-  $('#stage-explainer').textContent=modes[mode][1];
+  $('#stage-explainer').textContent=modes[mode][1]+(mode==='original'||mode==='deconv'?'':` 当前锁定类别：${state.manifest.classes[state.targetClass]}。`);
   const overlay=$('#overlay-main');overlay.style.opacity=mode==='original'?'0':Number($('#opacity').value)/100;
   if(mode!=='original')overlay.src=info[mode];
   $$('.view-tab').forEach(b=>{b.classList.toggle('selected',b.dataset.view===mode);b.setAttribute('aria-pressed',b.dataset.view===mode?'true':'false')});
 }
 function updateInsight(){
-  const e=state.epoch,info=state.info,journey=state.trajectory;
-  if(!journey){setText('#epoch-insight','选择图片后，可以逐个 Epoch 检查它的真实模型预测。');return}
+  const e=state.epoch,journey=state.trajectory;
+  if(!journey||state.targetClass===null){setText('#epoch-insight','选择图片后，可逐个 Epoch 检查固定类别的真实概率。');return}
   const item=journey.evolution[e];if(!item)return;
-  const target=journey.true_class;
+  const target=state.targetClass;
   const first=journey.evolution[0];
+  const delta=(targetProbability(item)-targetProbability(first))*100;
   let desc;
-  if(e===0)desc='尚未训练：所有权重随机初始化。Feature Map 和概率不是学习结果。';
-  else if(target===null)desc=`当前模型预测 ${state.manifest.classes[item.predicted_class]}，置信度 ${pct(item.confidence)}；上传图片没有已知标签，无法计算是否预测正确。`;
-  else{
-    const delta=(item.true_class_probability-first.true_class_probability)*100;
-    desc=`真实类别「${state.manifest.classes[target]}」的预测概率相对初始 Checkpoint ${delta>=0?'提升':'下降'}了 ${Math.abs(delta).toFixed(1)} 个百分点。当前${item.predicted_class===target?'预测正确':'仍预测错误'}。`;
-  }
+  if(e===0)desc=`Epoch 0：尚未训练。锁定解释类别「${state.manifest.classes[target]}」，当前预测「${state.manifest.classes[item.predicted_class]}」。`;
+  else desc=`固定目标「${state.manifest.classes[target]}」的概率相对 Epoch 0 ${delta>=0?'提升':'下降'} ${Math.abs(delta).toFixed(1)} 个百分点；模型当前预测「${state.manifest.classes[item.predicted_class]}」${journey.true_class===null?'（上传图片无真实标签）':item.predicted_class===journey.true_class?'，预测正确':'，预测错误'}。`;
   setText('#epoch-insight',desc);
 }
+
 function svgPath(data,w,h,pad=8){
   const values=data.filter(v=>Number.isFinite(v));if(!values.length)return'';
   const min=Math.min(...values),max=Math.max(...values),span=Math.max(max-min,1e-6);
@@ -132,7 +192,9 @@ function svgPath(data,w,h,pad=8){
 }
 function renderTrajectory(){
   const journey=state.trajectory;if(!journey)return;
-  const arr=journey.evolution.map(e=>e.true_class_probability??e.confidence),w=540,h=105,pad=9;
+  if(state.targetClass===null)return;
+  setText('#trajectory-kind',`FIXED CLASS · ${state.manifest.classes[state.targetClass]}`);
+  const arr=journey.evolution.map(targetProbability),w=540,h=105,pad=9;
   const d=svgPath(arr,w,h,pad);const x=pad+state.epoch*(w-pad*2)/Math.max(arr.length-1,1);
   const min=Math.min(...arr),max=Math.max(...arr),span=Math.max(max-min,1e-6);
   const y=h-pad-(arr[state.epoch]-min)/span*(h-pad*2);
@@ -152,7 +214,9 @@ function renderLoss(){
   $('#loss-chart').innerHTML=`<line x1="12" y1="64" x2="288" y2="64" stroke="#edf0f8" stroke-dasharray="3 5"/><line x1="12" y1="116" x2="288" y2="116" stroke="#edf0f8"/><path d="${path('train_loss')}" fill="none" stroke="#7485e6" stroke-width="2.4" stroke-linecap="round"/><path d="${path('val_loss')}" fill="none" stroke="#e1a3b0" stroke-width="2.4" stroke-linecap="round"/><line x1="${x}" y1="6" x2="${x}" y2="116" stroke="#a0aad5" stroke-dasharray="3 4"/>`;
   setText('#train-accuracy',pct(m[state.epoch]?.train_acc));
   setText('#val-accuracy',pct(m[state.epoch]?.val_acc));
-  setText('#gradient-norm',fmt(m[state.epoch]?.grad_norm,3));
+  const row=m[state.epoch];const hasMean=Object.hasOwn(row,'grad_norm_mean');
+  setText('#gradient-label',hasMean?'MEAN PRE-CLIP GRAD NORM':'LAST BATCH GRAD · LEGACY');
+  setText('#gradient-norm',fmt(hasMean?row.grad_norm_mean:row.grad_norm,3));
   setText('#weight-delta',fmt(m[state.epoch]?.weight_delta,3));
 }
 
@@ -162,13 +226,14 @@ async function loadChannelJourney(){
   const key=`${id}:${layer}:${channel}`;
   if(state.channelJourneyKey===key)return;
   state.channelJourneyKey=key;state.channelJourney=null;
-  setText('#channel-current','…');
+  setText('#channel-current','…');const signal=cancelRequest('channel');
   try{
-    const data=await api(`/api/channel-trajectory?sample_id=${encodeURIComponent(id)}&layer=${layer}&channel=${channel}`);
-    if(state.channelJourneyKey!==key)return;
+    const data=await api(`/api/channel-trajectory?sample_id=${encodeURIComponent(id)}&layer=${layer}&channel=${channel}`,{signal});
+    if(state.channelJourneyKey!==key||state.sample?.id!==id)return;
     state.channelJourney=data;renderChannelJourney();
-  }catch(e){if(state.channelJourneyKey===key)notify(e.message)}
+  }catch(e){if(!isAbort(e)&&state.channelJourneyKey===key)notify(e.message)}
 }
+
 function renderChannelJourney(){
   const obj=state.channelJourney;if(!obj||!obj.history.length)return;
   const arr=obj.history.map(x=>x.mean),w=540,h=90,pad=8;
@@ -181,8 +246,50 @@ function renderChannelJourney(){
   $('#channel-chart').innerHTML=`<path d="M ${pad} ${h-pad} L ${w-pad} ${h-pad}" stroke="#e5e9f7"/><path d="${d}" fill="none" stroke="#8a84df" stroke-width="2.7" stroke-linejoin="round" stroke-linecap="round"/><line x1="${x}" y1="0" x2="${x}" y2="${h}" stroke="#9faae1" stroke-dasharray="3 4"/><circle cx="${x}" cy="${y}" r="5" fill="#fff" stroke="#857ee1" stroke-width="3"/>`;
   setText('#channel-current',fmt(curr.mean,4));setText('#activation-drift',fmt(curr.activation_rms_change,4));
 }
-function chooseLayer(layer){state.layer=layer;state.channel=0;$$('.layer-button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.layer)===layer));
-  setText('#feature-explanation',layerText[layer][1]);setText('#interpretation-title',layerText[layer][2]);setText('#interpretation-text',layerText[layer][3]);loadInspect()}
+function invalidateChannel(){
+  cancelRequest('inspect');cancelRequest('channel');cancelRequest('compare');
+  state.requestId++;state.compareRevision++;state.channelJourneyKey=null;
+  state.channelJourney=null;state.compareInfo=null;state.compareKey=null;clearComparisonDisplay();
+}
+function selectChannel(channel){
+  if(channel===state.channel)return;
+  invalidateChannel();state.channel=channel;loadInspect();loadCompare();
+}
+function chooseLayer(layer){
+  if(layer===state.layer)return;
+  invalidateChannel();state.layer=layer;state.channel=0;
+  $$('.layer-button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.layer)===layer));
+  setText('#feature-explanation',layerText[layer][1]);setText('#interpretation-title',layerText[layer][2]);setText('#interpretation-text',layerText[layer][3]);
+  loadInspect();loadCompare();
+}
+function changeCompareEpoch(side,value){
+  const number=Number(value);if(side==='a')state.epochA=number;else state.epochB=number;
+  renderCompareControls();loadCompare();
+}
+async function loadCompare(){
+  if(!state.sample||!state.manifest)return;
+  const id=state.sample.id,layer=state.layer,channel=state.channel;
+  const a=state.epochA,b=state.epochB,mode=state.scaleMode;
+  const key=`${id}:${layer}:${channel}:${a}:${b}:${mode}`;
+  if(state.compareKey===key)return;state.compareKey=key;
+  const revision=++state.compareRevision,signal=cancelRequest('compare');clearComparisonDisplay();
+  try{
+    const data=await api(`/api/compare?sample_id=${encodeURIComponent(id)}&epoch_a=${a}&epoch_b=${b}&layer=${layer}&channel=${channel}&scale_mode=${mode}`,{signal});
+    if(revision!==state.compareRevision||id!==state.sample?.id||layer!==state.layer||channel!==state.channel)return;
+    state.compareInfo=data;renderCompare();
+  }catch(e){if(!isAbort(e)&&revision===state.compareRevision){state.compareKey=null;notify(e.message)}}
+}
+function renderCompare(){
+  const obj=state.compareInfo;if(!obj)return;
+  $('#compare-a-image').src=obj.a;$('#compare-b-image').src=obj.b;
+  $('#compare-diff-image').src=obj.difference;
+  setText('#compare-rms',fmt(obj.rms_difference,4));
+  setText('#compare-mean',fmt(obj.delta_mean,4));
+  setText('#compare-cosine',fmt(obj.cosine_similarity,3));
+  setText('#compare-scale-label',`±${fmt(obj.difference_scale.high,3)}`);
+  setText('#compare-note',obj.note+(obj.scale_mode==='local'?' A/B 为各自拉伸，不能比较颜色亮度。':' A/B 与其他 Epoch 使用统一色标。'));
+}
+
 function stopPlayback(){if(state.timer){clearInterval(state.timer);state.timer=null}setText('#play-icon','▶');$('#play').setAttribute('aria-label','播放训练历程')}
 function togglePlayback(){if(state.timer){stopPlayback();return}if(!state.manifest)return;if(state.epoch===state.manifest.epochs)updateEpoch(0);
   setText('#play-icon','Ⅱ');$('#play').setAttribute('aria-label','暂停训练历程');
@@ -197,6 +304,12 @@ function bindEvents(){
   $$('.view-tab').forEach(b=>b.addEventListener('click',()=>{state.mode=b.dataset.view;renderMode()}));
   $$('.layer-button').forEach(b=>b.addEventListener('click',()=>chooseLayer(Number(b.dataset.layer))));
   $('#opacity').addEventListener('input',e=>{setText('#opacity-value',e.target.value+'%');renderMode()});
+  $('#target-class').addEventListener('change',e=>setTargetClass(e.target.value));
+  $('#scale-mode').addEventListener('change',e=>changeScaleMode(e.target.value));
+  $('#epoch-a').addEventListener('change',e=>changeCompareEpoch('a',e.target.value));
+  $('#epoch-b').addEventListener('change',e=>changeCompareEpoch('b',e.target.value));
+  $('#pin-a').addEventListener('click',()=>changeCompareEpoch('a',state.epoch));
+  $('#pin-b').addEventListener('click',()=>changeCompareEpoch('b',state.epoch));
   $('#epoch-slider').addEventListener('input',e=>{stopPlayback();updateEpoch(Number(e.target.value))});
   $('#play').addEventListener('click',togglePlayback);
   $('#reset-time').addEventListener('click',()=>{stopPlayback();updateEpoch(0)});

@@ -20,7 +20,7 @@
   </header>
   <main class="page">
     <section class="hero">
-      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.1</span></div>
+      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.2.2</span></div>
         <h1>Watch intelligence<br /><span>take shape.</span></h1>
         <p>打开神经网络的黑箱。选择一张图像，穿越训练时间，观察模型如何从随机猜测，逐渐学会识别世界。</p>
         <div class="hero-pills"><span>◈ 真实训练检查点</span><span>◌ 逐层特征演化</span><span>⌁ 可解释性实验</span></div>
@@ -49,6 +49,11 @@
           <section class="inspection panel" aria-label="输入图片和归因区域">
             <div class="panel-heading inspection-head"><div><span class="tiny-label">02 / INSPECT</span><h3>What does it see<span class="muted-dot">?</span></h3></div><span class="mode-tag" id="view-kind">ORIGINAL INPUT</span></div>
             <div class="visual-stage"><div class="stage-grid"></div><div class="image-display"><div class="image-halo"></div><img id="input-main" alt="当前选择的原始图片" /><img id="overlay-main" alt="模型解释热力图叠加层" /></div><div class="stage-caption"><span class="stage-circle"></span><span id="stage-explainer">这是模型实际接收的输入图像。</span></div><span class="resolution">16 × 16 MODEL INPUT</span></div>
+            <div class="target-control" aria-label="固定解释目标">
+              <label for="target-class">ATTRIBUTION TARGET · 固定类别</label>
+              <select id="target-class" aria-label="选择固定归因类别"></select>
+              <span id="target-note">锁定同一类别，跨 Epoch 的归因才可比较。</span>
+            </div>
             <div class="view-controls" role="group" aria-label="可视化模式">
               <button class="view-tab selected" data-view="original">原图</button>
               <button class="view-tab" data-view="gradcam">Grad-CAM</button>
@@ -63,9 +68,9 @@
             <div class="epoch-display"><div><span>CHECKPOINT</span><strong>Epoch <em id="current-epoch">00</em></strong></div><div class="epoch-meta"><span id="training-state">随机初始化</span><span class="epoch-divider">/</span><span id="total-epochs">00</span></div></div>
             <div class="timeline-controls"><button class="play-button" id="play" aria-label="播放训练历程"><span id="play-icon">▶</span></button><input type="range" id="epoch-slider" min="0" max="10" step="1" value="0" aria-label="选择 Epoch" /><button class="step-button" id="next-epoch" title="下一轮">→</button></div>
             <div class="timeline-numbers"><span>UNTRAINED</span><span id="end-epoch">EPOCH 10</span></div>
-            <div class="trajectory"><div class="trajectory-top"><span>TRUE-CLASS CONFIDENCE</span><strong id="trajectory-value">—</strong></div><svg id="trajectory-chart" viewBox="0 0 540 105" role="img" aria-label="所选图片真实类别置信度随训练改变的曲线" preserveAspectRatio="none"></svg></div>
+            <div class="trajectory"><div class="trajectory-top"><span id="trajectory-kind">FIXED-TARGET CONFIDENCE</span><strong id="trajectory-value">—</strong></div><svg id="trajectory-chart" viewBox="0 0 540 105" role="img" aria-label="所选图片真实类别置信度随训练改变的曲线" preserveAspectRatio="none"></svg></div>
             <div class="checkpoint-insight" id="epoch-insight">正在加载训练历程…</div>
-            <div class="opt-stats"><div><span>GRADIENT NORM</span><strong id="gradient-norm">—</strong></div><div><span>WEIGHT CHANGE</span><strong id="weight-delta">—</strong></div></div>
+            <div class="opt-stats"><div><span id="gradient-label">MEAN GRAD NORM</span><strong id="gradient-norm">—</strong></div><div><span>WEIGHT CHANGE</span><strong id="weight-delta">—</strong></div></div>
           </section>
         </div>
         <aside class="right-column">
@@ -77,9 +82,24 @@
     </section>
     <section class="layers-section" id="layers">
       <div class="section-intro"><span class="tiny-label">BEYOND THE OUTPUT</span><h2>Step inside the <em>network.</em></h2><p>从滤波器到特征激活。选择任意卷积层与通道，并移动 Epoch，亲眼看见抽象特征逐渐形成。</p></div>
-      <div class="layers-grid"><div class="feature-browser panel"><div class="panel-heading"><div><span class="tiny-label">06 / FEATURE EXPLORER</span><h3>Activation atlas<span class="muted-dot">.</span></h3></div><span class="small-counter" id="channel-count">—</span></div><div class="layer-tabs"><button data-layer="1" class="layer-button selected"><b>01</b> Early patterns</button><button data-layer="2" class="layer-button"><b>02</b> Composition</button><button data-layer="3" class="layer-button"><b>03</b> High-level</button></div><div class="feature-description" id="feature-explanation">第一层往往学习边缘、亮度和局部纹理。</div><div id="feature-grid" class="feature-grid"></div><div class="channel-journey"><div class="channel-journey-heading"><span>CHANNEL LEARNING CURVE</span><strong id="channel-current">—</strong></div><svg id="channel-chart" viewBox="0 0 540 90" role="img" aria-label="选定通道绝对平均激活随 Epoch 变化曲线" preserveAspectRatio="none"></svg><div class="channel-journey-foot"><span>MEAN ACTIVATION · ABSOLUTE SCALE</span><span>Δ RMS <b id="activation-drift">—</b></span></div></div>
+      <div class="layers-grid"><div class="feature-browser panel"><div class="panel-heading"><div><span class="tiny-label">06 / FEATURE EXPLORER</span><h3>Activation atlas<span class="muted-dot">.</span></h3></div><span class="small-counter" id="channel-count">—</span></div><div class="layer-tabs"><button data-layer="1" class="layer-button selected"><b>01</b> Early patterns</button><button data-layer="2" class="layer-button"><b>02</b> Composition</button><button data-layer="3" class="layer-button"><b>03</b> High-level</button></div><div class="scale-control"><label for="scale-mode">FEATURE MAP COLOR SCALE</label><select id="scale-mode" aria-label="特征图颜色标尺"><option value="fixed">Fixed · 跨轮次绝对值</option><option value="local">Local · 每图增强</option></select><span id="feature-scale-label">固定色标计算中…</span></div><div class="feature-description" id="feature-explanation">第一层往往学习边缘、亮度和局部纹理。</div><div id="feature-grid" class="feature-grid"></div><div class="channel-journey"><div class="channel-journey-heading"><span>CHANNEL LEARNING CURVE</span><strong id="channel-current">—</strong></div><svg id="channel-chart" viewBox="0 0 540 90" role="img" aria-label="选定通道绝对平均激活随 Epoch 变化曲线" preserveAspectRatio="none"></svg><div class="channel-journey-foot"><span>MEAN ACTIVATION · ABSOLUTE SCALE</span><span>Δ RMS <b id="activation-drift">—</b></span></div></div>
           <div class="feature-footer"><span>SELECTED CHANNEL <strong id="selected-channel">00</strong></span><span id="feature-size">—</span></div></div>
       <div class="feature-details"><div class="reconstruction panel"><div class="panel-heading"><div><span class="tiny-label">07 / REVERSE PROJECT</span><h3>Feature → Pixels<span class="muted-dot">.</span></h3></div></div><div class="science-tiles"><div class="science-tile"><div class="tile-heading">LEARNED FILTER</div><img id="filter-image" alt="当前通道的卷积核平均权重（带正负号）" /><p>卷积权重 · 正负值映射</p></div><div class="science-tile"><div class="tile-heading">DECONV PROJECTION</div><img id="deconv-image" alt="DeconvNet 将当前特征峰值逆向投影到输入像素空间" /><p>选定单峰激活 · 逆向投影</p></div></div><div class="activation-metrics"><div><span>MEAN ACTIVATION</span><strong id="activation-mean">—</strong></div><div><span>ZERO FRACTION</span><strong id="activation-sparsity">—</strong></div></div></div><div class="explain panel"><span class="tiny-label">HOW TO READ IT</span><h3 id="interpretation-title">从像素到边缘。</h3><p id="interpretation-text">卷积核逐步响应局部笔画。选择不同通道，观察它们是否具有不同的模式偏好。</p><div class="explain-divider"></div><div class="formula">z<sub>l</sub> = W<sub>l</sub> * a<sub>l-1</sub> + b<sub>l</sub></div><p class="formula-desc">DeconvNet 显示的是选中激活的投影，不代表模型对某一类别的完整归因。</p></div></div></div>
+      <section class="comparison-lab panel" aria-label="两轮激活对比实验">
+        <div class="comparison-heading"><div><span class="tiny-label">08 / CONTROLLED COMPARISON</span><h3>Two moments. <em>One neuron.</em></h3><p>固定同一图像、层与通道；A、B 使用同一色标。差分图 = B − A，颜色以零为中心。</p></div><div class="compare-controls">
+          <label for="epoch-a">Epoch A<select id="epoch-a" aria-label="对照轮次 A"></select></label>
+          <button id="pin-a" type="button" title="以当前时间轴 Epoch 作为 A">Use current ↙</button>
+          <label for="epoch-b">Epoch B<select id="epoch-b" aria-label="对照轮次 B"></select></label>
+          <button id="pin-b" type="button" title="以当前时间轴 Epoch 作为 B">Use current ↙</button>
+        </div></div>
+        <div class="comparison-panes">
+          <div class="comparison-pane"><span class="pane-label">A · <b id="epoch-a-label">EPOCH 00</b></span><img id="compare-a-image" alt="A Epoch 特征图，固定或本地图像色标" /></div>
+          <div class="comparison-pane"><span class="pane-label">B · <b id="epoch-b-label">EPOCH 10</b></span><img id="compare-b-image" alt="B Epoch 特征图，固定或本地图像色标" /></div>
+          <div class="comparison-pane pane-difference"><span class="pane-label">Δ · <b>B − A</b></span><img id="compare-diff-image" alt="B 减 A 的有符号激活差分图" /></div>
+        </div>
+        <div class="comparison-numbers"><div><span>RMS CHANGE</span><strong id="compare-rms">—</strong></div><div><span>MEAN Δ</span><strong id="compare-mean">—</strong></div><div><span>SPATIAL COSINE</span><strong id="compare-cosine">—</strong></div><div><span>ABSOLUTE SCALE</span><strong id="compare-scale-label">—</strong></div></div>
+        <p class="comparison-footnote" id="compare-note">数值直接从两个检查点的原始激活计算，而非从 PNG 颜色推导。Local 模式仅用于增强细节，不可用颜色亮度比较激活量。差分使用固定 ±Layer Max 范围。</p>
+      </section>
     </section>
     <footer id="science"><div class="footer-top"><div class="footer-mark">CV<span>·</span></div><p>Make learning visible.<br />Make explanations testable.</p><a href="#journey">BACK TO EXPERIMENT ↑</a></div><div class="footer-bottom"><span>BASED ON ZEILER & FERGUS · ECCV 2014</span><span>REAL CHECKPOINTS · OPEN RESEARCH · BUILT FOR CURIOSITY</span></div></footer>
   </main>
