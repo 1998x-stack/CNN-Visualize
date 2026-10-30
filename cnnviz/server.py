@@ -440,3 +440,78 @@ def step_probe(sample_id: str, step_a: int = Query(0, ge=0),
             }
     except (ValueError, RuntimeError, FileNotFoundError) as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+# V0.4 is isolated from the V0.3 16px experiment: its run, checkpoints and
+# held-out probe population are independently versioned and explicitly named.
+from . import dynamics as dyn
+
+
+@app.get('/api/dynamics/runs')
+def dynamics_runs():
+    if not dyn.BASE_DIR.exists():
+        return {'runs': [], 'message': 'Create a research run with python -m cnnviz.research'}
+    runs=[]
+    for entry in sorted(dyn.BASE_DIR.iterdir()):
+        if entry.is_dir() and (entry/'manifest.json').is_file():
+            try:
+                m=dyn.load_run(entry.name)
+                runs.append({'run_id':m['run_id'],'dataset':m['dataset'],
+                             'variant':m['variant'],'snapshots':len(m['snapshots']),
+                             'steps':len(m['events']), 'epochs':m['epochs'],
+                             'final_accuracy':m['metrics'][-1]['val_accuracy'] if m['metrics'] else None})
+            except (ValueError, OSError, KeyError, json.JSONDecodeError):
+                continue
+    return {'runs':runs}
+
+
+@app.get('/api/dynamics/manifest')
+def dynamics_manifest(run_id: str):
+    try:
+        return dyn.load_run(run_id)
+    except (ValueError, OSError) as exc:
+        raise HTTPException(status_code=404,detail=str(exc)) from exc
+
+
+@app.get('/api/dynamics/cka')
+def dynamics_cka(run_id: str,layer: int=Query(1,ge=1,le=5)):
+    try:
+        return dyn.temporal_cka(run_id,layer)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+
+@app.get('/api/dynamics/snapshot')
+def dynamics_snapshot(run_id: str,step: int=Query(0,ge=0),layer: int=Query(1,ge=1,le=5)):
+    try:
+        return dyn.snapshot_diagnostics(run_id,step,layer)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+
+@app.get('/api/dynamics/clusters')
+def dynamics_clusters(run_id: str,step: int=Query(0,ge=0),
+                      layer: int=Query(1,ge=1,le=5),groups: int=Query(4,ge=2,le=8)):
+    try:
+        return dyn.channel_clusters(run_id,step,layer,groups)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+
+@app.get('/api/dynamics/probe')
+def dynamics_probe(run_id: str,step_a: int=Query(0,ge=0),step_b: int=Query(0,ge=0),
+                   layer: int=Query(1,ge=1,le=5),channel: int=Query(0,ge=0),
+                   sample_index: int=Query(0,ge=0)):
+    try:
+        return dyn.pair_probe(run_id,step_a,step_b,layer,channel,sample_index)
+    except (ValueError, OSError, RuntimeError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+
+@app.get('/dynamics.css')
+def dynamics_stylesheet():
+    return FileResponse(ROOT/'web'/'dynamics.css',media_type='text/css')
+
+
+@app.get('/dynamics.js')
+def dynamics_javascript():
+    return FileResponse(ROOT/'web'/'dynamics.js',media_type='text/javascript')

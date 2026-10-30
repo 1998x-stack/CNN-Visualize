@@ -7,6 +7,8 @@
   <title>CNN Visualize — Watch a neural network learn</title>
   <link rel="stylesheet" href="/app.css" />
   <script src="/app.js" defer></script>
+  <link rel="stylesheet" href="/dynamics.css" />
+  <script src="/dynamics.js" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
@@ -15,12 +17,12 @@
       <span class="symbol"><span></span><span></span><span></span></span>
       <span>CNN<span class="identity-light"> / VISUALIZE</span></span>
     </a>
-    <div class="toplinks"><a href="#journey">学习历程</a><a href="#steps">Step 显微镜</a><a href="#layers">神经网络内部</a><a href="#science">研究说明</a></div>
+    <div class="toplinks"><a href="#journey">学习历程</a><a href="#steps">Step 显微镜</a><a href="#layers">神经网络内部</a><a href="#dynamics">Neural Dynamics</a><a href="#science">研究说明</a></div>
     <div class="header-right"><span class="status"><i></i> MODEL CONNECTED</span><a class="header-github" href="https://github.com/1998x-stack/CNN-Visualize" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></div>
   </header>
   <main class="page">
     <section class="hero">
-      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.3.0</span></div>
+      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.4.0</span></div>
         <h1>Watch intelligence<br /><span>take shape.</span></h1>
         <p>打开神经网络的黑箱。选择一张图像，穿越训练时间，观察模型如何从随机猜测，逐渐学会识别世界。</p>
         <div class="hero-pills"><span>◈ 真实训练检查点</span><span>◌ 逐层特征演化</span><span>⌁ 可解释性实验</span></div>
@@ -146,6 +148,27 @@
         <div class="comparison-numbers"><div><span>RMS CHANGE</span><strong id="compare-rms">—</strong></div><div><span>MEAN Δ</span><strong id="compare-mean">—</strong></div><div><span>SPATIAL COSINE</span><strong id="compare-cosine">—</strong></div><div><span>ABSOLUTE SCALE</span><strong id="compare-scale-label">—</strong></div></div>
         <p class="comparison-footnote" id="compare-note">数值直接从两个检查点的原始激活计算，而非从 PNG 颜色推导。Local 模式仅用于增强细节，不可用颜色亮度比较激活量。差分使用固定 ±Layer Max 范围。</p>
       </section>
+    </section>
+
+    <section id="dynamics" class="dyn-area" aria-label="Neural Dynamics Observatory">
+      <div class="dyn-kicker"><span class="dyn-spark">✳</span> RESEARCH LAB / V0.4</div>
+      <div class="dyn-intro">
+        <div><h2>Observe the <em>unseen.</em></h2><p>不是仅仅让神经网络的特征变成彩色图案，而是量化每一次更新后，表征是否发生了变化。固定留出集、固定层、固定样本，追踪真正保存的模型状态。</p></div>
+        <div class="dyn-mini-stats"><span>LIVE OBSERVATORY</span><strong id="dyn-run-count">—</strong><small>研究实验</small></div>
+      </div>
+      <div class="dyn-workspace">
+        <div class="dyn-toolbar">
+          <label>EXPERIMENT<select id="dyn-run" aria-label="选择研究实验"></select></label>
+          <label>REPRESENTATION LAYER<select id="dyn-layer" aria-label="选择研究层"><option value="1">Conv 01 · Early</option><option value="2">Conv 02 · Combine</option><option value="3">Conv 03 · Mid</option><option value="4">Conv 04 · Deep</option><option value="5">Conv 05 · Semantic</option></select></label>
+          <div class="dyn-meta"><strong id="dyn-arch">—</strong><span id="dyn-provenance">—</span></div>
+        </div>
+        <div id="dyn-message" role="status" aria-live="polite" class="dyn-message"></div>
+        <div class="dyn-timeline-head"><div><span class="dyn-tag">01 / TEMPORAL REPRESENTATION</span><h3>How similar is <em>yesterday's network?</em></h3><p>Centered linear CKA · 相同留出样本 · 原始激活矩阵</p></div><span id="dyn-cka-score" class="dyn-score">—</span></div>
+        <div class="dyn-matrix-wrap"><div id="dyn-cka-matrix" class="dyn-matrix" role="group" aria-label="跨 Step CKA 相似矩阵"></div><div class="dyn-matrix-aside"><div class="dyn-legend"><span>0 · DIFFERENT</span><div class="dyn-gradient"></div><span>1 · SIMILAR</span></div><p>点击矩阵中的两个时间点，将它们设为 A / B；CKA 反映表征相似性，不证明语义或因果关系。</p><div id="dyn-pair-label" class="dyn-pair-label">A STEP 0 → B STEP —</div></div></div>
+        <div class="dyn-snapshot-grid"><div class="dyn-panel dyn-histogram-panel"><div class="dyn-panel-heading"><span>02 / PARAMETER LANDSCAPE</span><strong>Weight distribution</strong></div><svg id="dyn-weight-hist" viewBox="0 0 480 160" preserveAspectRatio="none" role="img" aria-label="卷积核权重直方图"></svg><div class="dyn-metric-row"><span>WEIGHT L2 <b id="dyn-weight-norm">—</b></span><span>GRAD L2 <b id="dyn-grad-norm">—</b></span><span>UPDATE L2 <b id="dyn-update-norm">—</b></span></div><div class="dyn-panel-heading dyn-second-heading"><span>GRADIENT DISTRIBUTION · PRE-CLIP</span></div><svg id="dyn-grad-hist" viewBox="0 0 480 115" preserveAspectRatio="none" role="img" aria-label="梯度分布直方图"></svg><p class="dyn-footnote">训练 Batch 的梯度是优化前的值；下方表征来自固定留出集，不混用样本来源。</p></div>
+        <div class="dyn-panel"><div class="dyn-panel-heading"><span>03 / NEURON RESPONSE FAMILIES</span><strong>Response clustering</strong></div><div id="dyn-cluster-counts" class="dyn-cluster-counts"></div><div id="dyn-cluster-channels" class="dyn-cluster-channels" role="group" aria-label="神经元响应聚类"></div><div class="dyn-response-title">SELECTED NEURON · RESPONSE BY CLASS <span id="dyn-channel-label">CH 00</span></div><svg id="dyn-class-response" viewBox="0 0 480 155" preserveAspectRatio="none" role="img" aria-label="各类别平均通道响应"></svg><p class="dyn-footnote">按同一留出集上各通道的响应向量聚类；类别簇编号并不是跨 Epoch 固定的神经元语义。</p></div></div>
+        <div class="dyn-bottom dyn-panel"><div class="dyn-panel-heading"><span>04 / THE SAME IMAGE · TWO NETWORK STATES</span><strong>Feature evolution microscope</strong></div><div class="dyn-select-row"><label>A · REFERENCE<select id="dyn-step-a"></select></label><label>B · OBSERVED<select id="dyn-step-b"></select></label><label>HELD-OUT SAMPLE<input type="range" id="dyn-sample" min="0" max="39" value="0"/><span id="dyn-sample-label">00</span></label></div><div class="dyn-frames"><figure><span>INPUT / HELD-OUT</span><img id="dyn-input" alt="真实输入图片"/></figure><figure><span>STEP A</span><img id="dyn-image-a" alt="A 步骤特征激活"/></figure><figure><span>STEP B</span><img id="dyn-image-b" alt="B 步骤特征激活"/></figure><figure><span>SIGNED DIFFERENCE</span><img id="dyn-image-diff" alt="B-A 带符号激活差异"/></figure></div><div class="dyn-results"><div>REPRESENTATION CKA<strong id="dyn-pair-cka">—</strong></div><div>ACTIVATION RMS Δ<strong id="dyn-pair-rms">—</strong></div><div>TRUE-CLASS PROBABILITY Δ<strong id="dyn-prob">—</strong></div><div>MODEL PREDICTION<strong id="dyn-pred">—</strong></div></div><p id="dyn-explanation" class="dyn-footnote">所有图像使用同一幅值标尺；没有保存权重的训练事件不参与对照。</p></div>
+      </div>
     </section>
     <footer id="science"><div class="footer-top"><div class="footer-mark">CV<span>·</span></div><p>Make learning visible.<br />Make explanations testable.</p><a href="#journey">BACK TO EXPERIMENT ↑</a></div><div class="footer-bottom"><span>BASED ON ZEILER & FERGUS · ECCV 2014</span><span>REAL CHECKPOINTS · OPEN RESEARCH · BUILT FOR CURIOSITY</span></div></footer>
   </main>

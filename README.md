@@ -4,6 +4,26 @@
 
 Based on [Zeiler & Fergus, *Visualizing and Understanding Convolutional Networks* (ECCV 2014)](https://arxiv.org/abs/1311.2901). This is a small, scientifically explicit reimplementation and visualization lab, not a claim to reproduce the exact original ZFNet ImageNet result.
 
+
+## V0.4 · Neural Dynamics Observatory (NEW)
+
+The existing 16×16 three-convolution Epoch/Step explorer is **unchanged**. V0.4 adds a **separate** experiment family with **five convolutional layers**, real **32×32 model inputs**, two **AlexNet/ZFNet-inspired** first-layer configurations, fixed-probe **temporal linear CKA**, layer-specific weight/gradient histograms, KMeans channel-response groupings, and a new Apple-style **Observe the unseen** interactive dashboard. These are **small educational architectures**, not the original ImageNet models.
+
+To reproduce the offline research runs (source Digits are native **8×8**, interpolated to 32×32; **not** genuine 32px source detail):
+
+```bash
+python -m cnnviz.train --dataset digits --epochs 10 --step-interval 4
+python -m cnnviz.research --name research-digits-zf-v04 --variant zf-small --epochs 15 --train-limit 1024 --val-limit 160 --interval 16
+python -m cnnviz.research --name research-digits-alex-v04 --variant alex-small --epochs 15 --train-limit 1024 --val-limit 160 --interval 16
+uvicorn cnnviz.server:app --host 127.0.0.1 --port 8000
+```
+
+Choose a V0.4 research run at the bottom of the homepage, select `Conv 01..05`, click a cell in the CKA matrix to choose Step A/B, then select a neuron channel and fixed held-out sample. The UI displays **actual saved weights**, same-scale A/B activations and signed difference, per-layer gradient distributions and channel-response families. No unsaved Step weights are fabricated.
+
+**Native 32×32 CIFAR-10** is supported via `python -m cnnviz.research --dataset cifar10 --download ...`; it is **not** downloaded silently and not part of the measured offline demo. The current demo's two 15-Epoch, 1024-training-sample/160-validation-sample Digits experiments achieve 97.5% (`zf-small`) and 96.875% (`alex-small`) validation accuracy **on that one seed/split**, not a rigorous architecture benchmark. Each has 240 real optimizer events and 16 saved checkpoints. More seeds, CIFAR-10 and larger probe sets are future work.
+
+See **[V0.4 scientific design, equations, APIs and limitations](docs/V04-NEURAL-DYNAMICS.md)**.
+
 ## Quickstart (offline, CPU)
 
 ```bash
@@ -26,7 +46,7 @@ Open **http://127.0.0.1:8000/**. On first launch after cloning you **must genera
 
 The detailed visual design and scientific interpretation specification is in [`docs/VISUALIZATION-SYSTEM.md`](docs/VISUALIZATION-SYSTEM.md).
 
-**Important distinction:** the Epoch playback replays stored training checkpoints; it does not visualize individual optimizer steps. Grad-CAM and saliency are class-conditional for the **current predicted class**. DeconvNet does **not** establish class attribution. Colors are normalized **per image**, so they support qualitative spatial comparison but **not** quantitative heatmap intensity comparisons across epochs; rely on numeric activation means for that.
+**Legacy note:** the V0.3 Epoch/Step explorer uses real checkpoints and locks an explicit target class for gradient explanations. Its fixed-color mode supports quantitative comparisons. DeconvNet remains a single-peak feature projection, not a class attribution.
 
 ## Datasets
 
@@ -78,7 +98,7 @@ tests/          # Model, API, upload and reproducibility smoke tests
 | `/api/channel-trajectory?sample_id=...&layer=...&channel=...` | GET | Absolute channel activation stats and RMS change across all checkpoints |
 | `/api/upload` | POST | Upload ≤5MB image as multipart field `file` |
 
-## Scientific roadmap
+## Historical roadmap (superseded by the actual release notes below)
 
 **V0.2:** pre- and post-activation comparison; consistent cross-epoch heatmap scales; aligned nearest-neighbor top activations; global class-wise activation drift and similarity (CKA), deterministic gallery presets; network graph with clickable connections.
 
