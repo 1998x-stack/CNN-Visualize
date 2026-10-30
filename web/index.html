@@ -15,12 +15,12 @@
       <span class="symbol"><span></span><span></span><span></span></span>
       <span>CNN<span class="identity-light"> / VISUALIZE</span></span>
     </a>
-    <div class="toplinks"><a href="#journey">学习历程</a><a href="#layers">神经网络内部</a><a href="#science">研究说明</a></div>
+    <div class="toplinks"><a href="#journey">学习历程</a><a href="#steps">Step 显微镜</a><a href="#layers">神经网络内部</a><a href="#science">研究说明</a></div>
     <div class="header-right"><span class="status"><i></i> MODEL CONNECTED</span><a class="header-github" href="https://github.com/1998x-stack/CNN-Visualize" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></div>
   </header>
   <main class="page">
     <section class="hero">
-      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.2.2</span></div>
+      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.3.0</span></div>
         <h1>Watch intelligence<br /><span>take shape.</span></h1>
         <p>打开神经网络的黑箱。选择一张图像，穿越训练时间，观察模型如何从随机猜测，逐渐学会识别世界。</p>
         <div class="hero-pills"><span>◈ 真实训练检查点</span><span>◌ 逐层特征演化</span><span>⌁ 可解释性实验</span></div>
@@ -79,6 +79,52 @@
           <section class="detail-note panel"><span class="tiny-label">RESEARCH NOTE</span><h3>Visualization ≠ explanation.</h3><p>清晰的特征图不等于模型真正依赖该区域。用 Occlusion 进行干预对照，才能进一步检验解释是否忠实。</p><a href="https://arxiv.org/abs/1311.2901" target="_blank" rel="noopener noreferrer">READ THE ORIGINAL PAPER ↗</a></section>
         </aside>
       </div>
+    </section>
+    <section class="step-lab panel" id="steps" aria-label="逐步学习观测台">
+      <div class="step-header">
+        <div><span class="tiny-label">03 / OPTIMIZER MICROSCOPE · V0.3</span>
+          <h2>See every <em>update.</em></h2>
+          <p>每一个点是一次真实 optimizer.step()。浅色刻度为记录事件，亮色标记为可回放的权重快照；没有保存的步骤不会被插值伪造。</p>
+        </div>
+        <div class="step-run-pill"><span>RECORDED UPDATES</span><strong id="step-total">—</strong><small id="step-snapshot-count">—</small></div>
+      </div>
+      <div class="step-chart-header">
+        <div><span class="tiny-label">MINIBATCH METRIC · PRE-UPDATE</span><strong id="step-chart-name">Batch loss</strong></div>
+        <div class="step-mode-tabs" role="group" aria-label="步骤图表指标">
+          <button type="button" data-step-metric="loss_before_update" class="step-metric selected">Loss</button>
+          <button type="button" data-step-metric="gradient_norm_preclip" class="step-metric">Gradient</button>
+          <button type="button" data-step-metric="weight_delta_post_step" class="step-metric">Δ Weights</button>
+        </div>
+      </div>
+      <svg id="step-chart" viewBox="0 0 900 185" preserveAspectRatio="none" role="img" aria-label="每一个真实训练步骤的损失、梯度或者权重更新曲线"></svg>
+      <div class="step-range-guide"><span>GLOBAL STEP 1 · 真实 Batch 指标</span><span id="step-end-label">END OF TRAINING</span></div>
+      <div class="step-event-scrubber"><label for="step-event-slider">EVERY OPTIMIZER EVENT <b id="step-event-label">—</b></label><input type="range" id="step-event-slider" min="1" max="1" step="1" value="1" aria-label="逐个查看每一次 Optimizer Step 的真实训练指标" /><p id="step-event-info">所有 Step 的训练指标都有记录；只有部分步骤保存了可回放的模型。</p></div>
+      <div class="step-selector-grid">
+        <label>REFERENCE · A<select id="step-a" aria-label="参考步骤 A"></select></label>
+        <div class="step-selector-main"><label for="step-b">OBSERVE · B <span id="step-current-label">—</span></label>
+          <div class="step-slide"><button id="step-prev" type="button" aria-label="前一个保存的训练步骤">←</button><input id="step-b" type="range" min="0" max="0" step="1" value="0" aria-label="选择已保存的训练步骤"/><button id="step-next" type="button" aria-label="下一个保存的训练步骤">→</button></div>
+        </div>
+        <button type="button" id="step-play" class="step-play">▶ Play snapshots</button>
+      </div>
+      <div class="step-metrics" aria-live="polite">
+        <div><span>BATCH LOSS · BEFORE UPDATE</span><strong id="step-loss">—</strong></div>
+        <div><span>GRAD NORM · PRECLIP</span><strong id="step-grad">—</strong></div>
+        <div><span>PARAMETER Δ · POST STEP</span><strong id="step-weight">—</strong></div>
+        <div><span>LOCKED CLASS · Δ PROBABILITY</span><strong id="step-prob-delta">—</strong></div>
+      </div>
+      <div class="step-layer-block"><div class="step-layer-heading"><span>PRE-CLIP GRADIENT · BY LAYER</span><span>ACTUAL WEIGHT UPDATE · BY LAYER</span></div><div class="step-layer-grid"><div id="step-grad-layers" class="step-layer-bars"></div><div id="step-update-layers" class="step-layer-bars"></div></div></div>
+      <div class="step-grid">
+        <article class="step-image-card"><span>AT STEP A</span><img id="step-image-a" alt="参考步骤的真实激活图" /><small id="step-a-caption">—</small></article>
+        <article class="step-image-card"><span>AT STEP B</span><img id="step-image-b" alt="所选步骤的真实激活图" /><small id="step-b-caption">—</small></article>
+        <article class="step-image-card step-difference"><span>SIGNED Δ · B − A</span><img id="step-image-difference" alt="有符号激活差分图" /><small id="step-rms">—</small></article>
+        <article class="step-image-card"><span>FILTER UPDATE · B − A</span><img id="step-kernel-difference" alt="选中卷积通道的滤波器参数变化" /><small id="step-kernel-norm">—</small></article>
+      </div>
+      <div class="step-suggestions"><span>MOST CHANGED CHANNELS · 同层激活 RMS 排序</span><div id="step-channel-suggestions"></div></div>
+      <div class="step-bottom-grid">
+        <div class="step-detail"><span class="tiny-label">WHAT CHANGED?</span><h3 id="step-learning-title">Waiting for saved checkpoints…</h3><p id="step-learning-note">选择同一张图片、固定类别及 Layer/Channel；观察优化步骤如何改变特征与预测。</p><p class="step-footnote" id="step-scale-info">所有 Step 图像使用同一固定色标，差分以零为中心。</p></div>
+        <div class="step-detail"><span class="tiny-label">CLASS LOGIT · EXACT LINEAR CONTRIBUTIONS</span><h3>Which channels matter?</h3><div id="step-contributions" class="step-contributions"></div><p class="step-footnote">末层 GAP + Linear 的逐通道 Logit 项，不等于因果解释；显示 B 时刻幅值最大的八个通道。</p></div>
+      </div>
+      <p id="step-availability" class="step-availability" role="status"></p>
     </section>
     <section class="layers-section" id="layers">
       <div class="section-intro"><span class="tiny-label">BEYOND THE OUTPUT</span><h2>Step inside the <em>network.</em></h2><p>从滤波器到特征激活。选择任意卷积层与通道，并移动 Epoch，亲眼看见抽象特征逐渐形成。</p></div>

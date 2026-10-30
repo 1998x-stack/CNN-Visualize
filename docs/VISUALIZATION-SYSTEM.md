@@ -184,3 +184,46 @@ attribution after clearing the cache.
 - Still **epoch checkpoints**, not per optimizer step. No rigorous
   paper-faithful ZFNet deconvolution numeric parity or attribution fidelity
   certification yet.
+
+---
+
+## V0.3 · Step-level Learning Observatory
+
+### Scientific invariants
+
+1. One `event` is **one actual optimizer.step**. Recorded `loss_before_update` and `batch_accuracy_before_update` are measured on its TRAIN minibatch **before** the update. `gradient_norm_preclip` / `gradient_norm_layers_preclip` are the gradient magnitudes before gradient clipping; clipping threshold is 5.0.
+2. `weight_delta_post_step` is the actual parameter norm `||θ_after − θ_before||₂` **after** the Adam update (not `lr×gradient`). The `weight_delta_layers` values partition this norm by module.
+3. **Every** optimizer event is available in `steps.json`; only `snapshots` can be replayed as a model. `--step-interval N` saves every Nth step plus every Epoch's final step; step zero aliases the `epoch_000.pt` initialization. Missing weight snapshots are never interpolated.
+4. A Step image is the same held-out image evaluated on two saved models. It is **not** the training minibatch underlying the Step loss or gradient. Dataset splits, target class, layer and channel are held constant within comparisons.
+5. Fixed feature color scale is `[0, maximum activation]` across all channels and **all saved Step snapshots**, for the selected sample/layer. Raw spatial B−A is displayed with a symmetric fixed `±maximum`; the difference statistics operate on raw tensors. Kernel difference uses an independently normalized signed scale; do not compare kernel tile colors across different pairs.
+6. The final `Global Average Pool → Linear` head allows exact algebraic class-logit contributions, `W[c,k]·mean(A[k])`, excluding bias. This is a **decomposition**, not causal importance or a claim about dataset-wide semantics.
+7. Epoch snapshots are bitwise identical with and without Step observer instrumentation (verified for Digits seed 42, 10 epochs). No random step observer operations are used during training.
+8. No optimizer state is persisted with Step inference snapshots, so rewinding the slider is inference replay, **not** resuming/branching training. User uploads reside in server memory and are never part of training.
+
+### Files and API
+
+- `artifacts/demo/steps.json`: `{schema, step_interval, global_steps, events, snapshots, semantics}`.
+- `artifacts/demo/step_000004.pt`: a stored post-optimizer `state_dict`; `epoch_000.pt` is Step 0.
+- `GET /api/steps`: step events, availability and stored snapshot references. With legacy Epoch-only artifacts, returns `available=false`, rather than inventing observations.
+- `GET /api/step-probe?sample_id=...&step_a=4&step_b=20&layer=3&channel=5&target_class=7`: two actual saved model forward passes; raw activation comparison, filter change norm, prediction changes, fixed-class probabilities, and exact GAP+Linear contributions.
+- The API rejects steps without a saved checkpoint (HTTP 400). The UI keeps a separate **event** scrubber and **saved-snapshot** scrubber to make that separation visible.
+- Step data is intentionally generated at inference time for the selected image; saving all image × Step × Layer activations would be costly and redundant.
+
+### Reproduce and verify
+
+```bash
+python -m cnnviz.train --dataset digits --epochs 10 --step-interval 4 --out artifacts/demo
+pytest -q
+node --check web/app.js
+python tests/browser_smoke.py  # requires Playwright + Chromium
+uvicorn cnnviz.server:app --host 127.0.0.1 --port 8000
+```
+
+For a lighter run use `--train-limit 180`; for a full model at each step use `--step-interval 1` (higher disk use). Use `--no-step-records` to run in Epoch-only compatibility mode.
+
+### Explicit limitations and follow-on experiments
+
+- The primary trainer is a three-convolution 16×16 Digits/CIFAR-10 demo, not the original ImageNet ZFNet. Grad-CAM for the GAP+Linear model is related to ordinary CAM.
+- Individual channels are comparable **within the same training lineage**; they are not automatically aligned across unrelated seeds/runs.
+- Step data is minibatch-level. The Step event plot can be noisy, and changes in batch composition may dominate apparent loss movements. For data-consistent trends, use a fixed held-out input in `/api/step-probe`.
+- V0.4 candidates: separate per-module optimizer moment statistics, optimizer state snapshots for genuine branch/resume, dataset-agnostic high-resolution traces, and larger CNN architecture support.

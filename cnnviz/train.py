@@ -11,6 +11,7 @@ from torch import nn
 from torch.utils.data import DataLoader, TensorDataset
 from .data import get_dataset
 from .model import InspectableCNN
+from .steps import gradient_statistics, parameter_statistics, state_copy
 
 
 def accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
@@ -19,7 +20,10 @@ def accuracy(logits: torch.Tensor, labels: torch.Tensor) -> float:
 
 def run_training(*, dataset: str = "digits", epochs: int = 10,
                  out: str = "artifacts/demo", seed: int = 42,
-                 train_limit: int = 0, download: bool = False) -> dict:
+                 train_limit: int = 0, download: bool = False,
+                 step_interval: int = 4, record_steps: bool = True) -> dict:
+    if not (1 <= step_interval <= 10000):
+        raise ValueError("step_interval must be 1..10000")
     torch.set_num_threads(min(4, torch.get_num_threads()))
     random.seed(seed)
     np.random.seed(seed)
@@ -41,6 +45,13 @@ def run_training(*, dataset: str = "digits", epochs: int = 10,
         for i in matching[:4]:
             samples.append({"id": str(i), "label": label, "label_index": class_index})
     metrics = []
+    step_events: list[dict] = []
+    snapshot_refs: list[dict] = []
+    global_step = 0
+    if record_steps:
+        # Step zero is exactly epoch_000.pt; avoid duplicate initial state.
+        snapshot_refs.append({"step": 0, "epoch": 0, "batch": 0,
+                              "path": "epoch_000.pt", "reason": "initialization"})
 
     def snapshot(epoch: int, train_loss: float | None, train_acc: float | None,
                  grad_stats: dict | None, previous: dict | None) -> None:
@@ -73,13 +84,42 @@ def run_training(*, dataset: str = "digits", epochs: int = 10,
         model.train()
         running_loss = running_correct = running_total = 0
         grad_norms = []
-        for xb, yb in loader:
+        for batch_index, (xb, yb) in enumerate(loader, start=1):
+            before_step = {n: p.detach().clone() for n, p in model.named_parameters()} if record_steps else None
             optimizer.zero_grad(set_to_none=True)
             prediction = model(xb)
             loss = nn.functional.cross_entropy(prediction, yb)
             loss.backward()
-            grad_norms.append(float(nn.utils.clip_grad_norm_(model.parameters(), 5)))
+            grad_norm = float(nn.utils.clip_grad_norm_(model.parameters(), 5))
+            grad_norms.append(grad_norm)
             optimizer.step()
+            global_step += 1
+            if record_steps:
+                update = parameter_statistics(model, before_step)
+                # Gradients after clipping: use preclip * scaling factor for each layer.
+                layer_grad = gradient_statistics(model)
+                clip_factor = min(1.0, 5.0 / (grad_norm + 1e-6))
+                if clip_factor > 0:
+                    layer_grad = {k: v / clip_factor for k, v in layer_grad.items()}
+                is_last_batch = batch_index == len(loader)
+                save_checkpoint = (global_step % step_interval == 0 or is_last_batch)
+                path = f"step_{global_step:06d}.pt" if save_checkpoint else None
+                if save_checkpoint:
+                    torch.save(state_copy(model), output / path)
+                    snapshot_refs.append({"step": global_step, "epoch": epoch,
+                                          "batch": batch_index, "path": path,
+                                          "reason": "epoch_end" if is_last_batch else "interval"})
+                step_events.append({"step": global_step, "epoch": epoch, "batch": batch_index,
+                                    "samples_seen": min(batch_index * loader.batch_size, len(loader.dataset)),
+                                    "loss_before_update": round(float(loss.detach()), 8),
+                                    "batch_accuracy_before_update": round(accuracy(prediction.detach(), yb), 8),
+                                    "gradient_norm_preclip": round(grad_norm, 8),
+                                    "gradient_norm_layers_preclip": {k: round(v, 8) for k,v in layer_grad.items()},
+                                    "gradient_clipped": grad_norm > 5.0,
+                                    "weight_delta_post_step": round(update["global"], 10),
+                                    "weight_delta_layers": {k: round(v, 10) for k,v in update["by_layer"].items()},
+                                    "learning_rate": optimizer.param_groups[0]["lr"],
+                                    "has_checkpoint": save_checkpoint})
             running_loss += float(loss.detach()) * len(xb)
             running_correct += int((prediction.argmax(1) == yb).sum())
             running_total += len(xb)
@@ -89,11 +129,36 @@ def run_training(*, dataset: str = "digits", epochs: int = 10,
                   "max": round(max(grad_norms), 6),
                   "last": round(grad_norms[-1], 6), "batches": len(grad_norms)}, previous)
 
+    if record_steps:
+        # Write atomically so the browser never sees a half-written step log.
+        payload = {"schema": 1, "step_interval": step_interval,
+                   "global_steps": global_step, "events": step_events,
+                   "snapshots": snapshot_refs,
+                   "semantics": {
+                       "loss_before_update": "Cross entropy on the current training minibatch, before optimizer.step",
+                       "batch_accuracy_before_update": "Accuracy on that minibatch, before optimizer.step",
+                       "gradient_norm_preclip": "Global L2 norm before clip_grad_norm_(max_norm=5)",
+                       "gradient_norm_layers_preclip": "Per-module L2 gradient norms before clipping",
+                       "weight_delta_post_step": "Exact L2 norm of post-minus-pre optimizer parameters",
+                       "samples_seen": "Samples processed within the epoch; not unique across epochs",
+                       "snapshots": "State captured immediately after optimizer.step; epoch-end always retained",
+                   }}
+        temporary = output / "steps.json.tmp"
+        temporary.write_text(json.dumps(payload, indent=2, ensure_ascii=False), encoding="utf-8")
+        temporary.replace(output / "steps.json")
+    else:
+        (output / "steps.json").unlink(missing_ok=True)
+
     manifest = {"run_id": f"{dataset}-seed{seed}-e{epochs}", "dataset": dataset,
                 "source": source, "classes": labels, "channels": channels,
                 "model": "InspectableCNN", "input_size": [16, 16],
                 "train_count": len(train_ids), "validation_count": len(val_ids),
                 "seed": seed, "epochs": epochs, "metrics": metrics, "samples": samples,
+                "step_observatory": {"available": record_steps, "schema": 1,
+                    "global_steps": global_step if record_steps else 0,
+                    "saved_snapshots": len(snapshot_refs), "step_interval": step_interval},
+                "training_config": {"batch_size": 128, "optimizer": "Adam", "learning_rate": 0.003,
+                    "clip_grad_norm": 5.0, "step_snapshot_policy": "interval + every epoch end"},
                 "gradient_norm_definition": "Global L2 norm before clipping (clip threshold=5), mean/max/last over minibatches",
                 "notes": ["Every checkpoint is a real trained PyTorch state_dict, including epoch 0 (random initialization).",
                           "Gallery samples belong to the held-out validation/test split.",
@@ -110,10 +175,15 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--train-limit", type=int, default=0)
     parser.add_argument("--download", action="store_true", help="Allow torchvision download for CIFAR10")
+    parser.add_argument("--step-interval", type=int, default=4,
+                        help="Persist post-optimizer state every N steps plus epoch ends")
+    parser.add_argument("--no-step-records", action="store_true", help="Disable V0.3 step metrics and snapshots")
     args = parser.parse_args()
     if args.epochs < 1 or args.epochs > 200:
         parser.error("epochs must be 1..200")
-    run_training(**vars(args))
+    kwargs = vars(args)
+    kwargs["record_steps"] = not kwargs.pop("no_step_records")
+    run_training(**kwargs)
 
 
 if __name__ == "__main__":

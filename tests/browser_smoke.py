@@ -42,6 +42,31 @@ async def main():
   browser=await pw.chromium.launch(executable_path='/usr/bin/chromium',headless=True,args=['--no-sandbox'])
   page,errors=await build_page(browser,1440,900)
   await page.wait_for_function("document.querySelector('#compare-rms')?.textContent !== '—' && document.querySelector('#compare-rms')?.textContent !== '…'",timeout=15000)
+  if await page.locator('#step-total').inner_text() != '—':
+   await page.wait_for_function("document.querySelector('#step-rms')?.textContent.includes('Activation RMS')",timeout=15000)
+   assert await page.locator('#step-total').inner_text() == '120'
+   assert await page.locator('#step-snapshot-count').inner_text() == '31 saved snapshots'
+   await page.locator('[data-step-metric="gradient_norm_preclip"]').click()
+   assert 'Gradient' in await page.locator('#step-chart-name').inner_text()
+   await page.locator('#step-a').select_option('4')
+   await page.wait_for_function("document.querySelector('#step-a-caption').textContent === 'STEP 4'",timeout=15000)
+   await page.locator('#step-b').fill('5')
+   await page.locator('#step-b').dispatch_event('input')
+   await page.wait_for_function("document.querySelector('#step-b-caption').textContent === 'STEP 20'",timeout=15000)
+   await page.wait_for_function("document.querySelector('#step-rms').textContent.includes('Activation RMS')",timeout=15000)
+   assert (await page.locator('#step-image-difference').get_attribute('src')).startswith('data:image/png;base64,')
+   assert await page.locator('.step-contribution').count() == 8
+   assert await page.locator('#step-channel-suggestions button').count() == 5
+   await page.locator('#step-event-slider').fill('3')
+   await page.locator('#step-event-slider').dispatch_event('input')
+   assert '没有' in await page.locator('#step-event-info').inner_text()
+   assert 'STEP 3' in await page.locator('#step-event-label').inner_text()
+   assert 'STEP 20' in await page.locator('#step-b-caption').inner_text()
+   await page.locator('#step-event-slider').fill('20')
+   await page.locator('#step-event-slider').dispatch_event('input')
+   await page.locator('#step-channel-suggestions button').first.click()
+   await page.wait_for_function("document.querySelector('#step-rms').textContent.includes('Activation RMS')",timeout=15000)
+   print('step lab ok',await page.locator('#step-current-label').inner_text(), 'RMS',await page.locator('#step-rms').inner_text())
   print('initial',await page.locator('#run-title').inner_text(),'target',await page.locator('#target-class').input_value(),'rms',await page.locator('#compare-rms').inner_text())
   await page.locator('#epoch-slider').fill('7');await page.locator('#epoch-slider').dispatch_event('input');
   await page.locator('#target-class').select_option('8')
@@ -60,11 +85,13 @@ async def main():
   assert consistent['sample']==consistent['inspect']==consistent['compare']
   assert consistent['layer']==consistent['reportedLayer']
   print('sample',await page.locator('.sample.active').count(),'pred',await page.locator('#predicted-label').inner_text(),'compare',await page.locator('#compare-rms').inner_text(),'errors',errors)
-  await page.screenshot(path=str(root/'preview-v022-desktop.png'),full_page=True)
+  await page.screenshot(path=str(root/'preview-v03-desktop.png'),full_page=True)
   assert not errors, errors
   mobile,mobile_errors=await build_page(browser,390,844)
   await mobile.wait_for_function("document.querySelector('#compare-rms')?.textContent !== '—' && document.querySelector('#compare-rms')?.textContent !== '…'",timeout=15000)
-  await mobile.screenshot(path=str(root/'preview-v022-mobile.png'),full_page=True)
+  if await mobile.locator('#step-total').inner_text() != '—':
+   await mobile.wait_for_function("document.querySelector('#step-rms')?.textContent.includes('Activation RMS')",timeout=15000)
+  await mobile.screenshot(path=str(root/'preview-v03-mobile.png'),full_page=True)
   scroll=await mobile.evaluate('document.documentElement.scrollWidth')
   print('mobile scroll',scroll,'viewport',await mobile.evaluate('innerWidth'),'errors',mobile_errors)
   assert scroll<=392, f'mobile horizontal overflow: {scroll}'

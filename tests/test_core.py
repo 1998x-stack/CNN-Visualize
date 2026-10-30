@@ -42,10 +42,16 @@ def experiment(tmp_path, monkeypatch):
     server.context.cache_clear()
     server.checkpoint.cache_clear()
     server.fixed_activation_scale.cache_clear()
+    server.step_timeline.cache_clear()
+    server.step_checkpoint.cache_clear()
+    server.step_activation_scale.cache_clear()
     yield manifest, TestClient(server.app)
     server.context.cache_clear()
     server.checkpoint.cache_clear()
     server.fixed_activation_scale.cache_clear()
+    server.step_timeline.cache_clear()
+    server.step_checkpoint.cache_clear()
+    server.step_activation_scale.cache_clear()
 
 
 def test_training_checkpoints_and_api(experiment):
@@ -194,3 +200,104 @@ def test_compare_before_inspect_does_not_poison_cached_model(experiment):
                                                'layer': 3, 'channel': 1, 'target_class': 6})
     assert info.status_code == 200, info.text
     assert info.json()['attribution_target_class'] == 6
+
+
+def test_step_events_are_real_postoptimizer_updates(experiment):
+    manifest, client = experiment
+    response = client.get('/api/steps')
+    assert response.status_code == 200
+    record = response.json()
+    assert record['available'] and record['schema'] == 1
+    assert [x['step'] for x in record['events']] == [1, 2, 3, 4]
+    assert record['snapshots'][0]['step'] == 0
+    assert [x['step'] for x in record['snapshots']] == [0, 2, 4]
+    assert record['recording']['global_steps'] == 4
+    import cnnviz.server as server
+    for epoch, global_step in [(1, 2), (2, 4)]:
+        recorded = server.step_checkpoint(global_step).state_dict()
+        epoch_weights = server.checkpoint(epoch).state_dict()
+        assert all(torch.equal(recorded[k], epoch_weights[k]) for k in recorded)
+    for row in record['events']:
+        assert row['gradient_norm_preclip'] > 0
+        assert row['weight_delta_post_step'] > 0
+        norm_by_layer = sum(float(v)**2 for v in row['gradient_norm_layers_preclip'].values()) ** 0.5
+        assert norm_by_layer == pytest.approx(row['gradient_norm_preclip'], rel=0.0002)
+        delta_by_layer = sum(float(v)**2 for v in row['weight_delta_layers'].values()) ** 0.5
+        assert delta_by_layer == pytest.approx(row['weight_delta_post_step'], abs=1e-7)
+        assert row['has_checkpoint'] == (row['step'] in (2,4))
+    assert manifest['step_observatory']['saved_snapshots'] == 3
+
+
+def test_step_probe_fixed_sample_class_and_signed_difference(experiment):
+    manifest, client = experiment
+    sample = manifest['samples'][0]['id']
+    params = {'sample_id': sample, 'step_a': 0, 'step_b': 4,
+              'layer': 2, 'channel': 3, 'target_class': 4}
+    response = client.get('/api/step-probe', params=params)
+    assert response.status_code == 200, response.text
+    obj = response.json()
+    assert obj['step_a'] == 0 and obj['step_b'] == 4
+    assert obj['scale']['scope'] == 'sample_layer_all_saved_steps_all_channels'
+    assert obj['a'].startswith('data:image/png;base64,')
+    assert obj['b'].startswith('data:image/png;base64,')
+    assert obj['difference'].startswith('data:image/png;base64,')
+    assert obj['filter_delta'].startswith('data:image/png;base64,')
+    assert obj['rms_difference'] > 0 and obj['kernel_delta_l2'] > 0
+    assert obj['probability_delta'] == pytest.approx(obj['probability_b'] - obj['probability_a'], abs=1e-6)
+    assert obj['logit_delta'] == pytest.approx(obj['logit_b'] - obj['logit_a'], abs=1e-6)
+    import cnnviz.server as server
+    x, _ = server.sample_tensor(sample)
+    with torch.no_grad():
+        ma = server.step_checkpoint(0)
+        mb = server.step_checkpoint(4)
+        la, ta = ma.forward_trace(x)
+        lb, tb = mb.forward_trace(x)
+        delta = tb['features'][1][0,3]-ta['features'][1][0,3]
+    assert obj['delta_mean'] == pytest.approx(float(delta.mean()), abs=1e-7)
+    assert obj['rms_difference'] == pytest.approx(float(delta.square().mean().sqrt()), abs=1e-7)
+    assert obj['logit_b'] == pytest.approx(float(lb[0,4]), abs=1e-7)
+    same = client.get('/api/step-probe',params={**params,'step_b':0}).json()
+    assert same['rms_difference'] == 0
+    assert same['kernel_delta_l2'] == 0
+    assert same['probability_delta'] == 0
+    assert len(obj['class_contributions']) == 8
+    assert len(obj['top_changing_channels']) == 5
+    assert all(x['activation_rms_difference'] >= y['activation_rms_difference']
+               for x,y in zip(obj['top_changing_channels'],obj['top_changing_channels'][1:]))
+
+
+def test_step_probes_reject_unrecorded_steps_and_invalid_inputs(experiment):
+    manifest, client = experiment
+    sample = manifest['samples'][0]['id']
+    for params, code in [
+        ({'sample_id':sample,'step_b':1},400),
+        ({'sample_id':sample,'step_b':999},400),
+        ({'sample_id':sample,'target_class':999},400),
+        ({'sample_id':sample,'layer':3,'channel':999},400),
+        ({'sample_id':'../../hello','step_b':2},400),
+        ({'sample_id':sample,'step_b':-1},422),
+    ]:
+        assert client.get('/api/step-probe',params=params).status_code == code
+    # Checkpoints first loaded under no_grad are compatible with later grad attribution.
+    import cnnviz.server as server
+    server.checkpoint.cache_clear()
+    assert client.get('/api/step-probe',params={'sample_id':sample,'step_b':4}).status_code == 200
+    assert client.get('/api/inspect',params={'sample_id':sample,'epoch':2,'target_class':2}).status_code == 200
+
+
+def test_step_recording_can_be_disabled(tmp_path,monkeypatch):
+    manifest = run_training(epochs=1,out=str(tmp_path),train_limit=128,record_steps=False)
+    assert manifest['step_observatory']['available'] is False
+    assert not (tmp_path / 'steps.json').exists()
+    import cnnviz.server as server
+    monkeypatch.setattr(server,'ARTIFACT_DIR',tmp_path)
+    for cache in [server.context,server.checkpoint,server.fixed_activation_scale,server.step_timeline,
+                  server.step_checkpoint,server.step_activation_scale]:
+        cache.cache_clear()
+    client=TestClient(server.app)
+    response=client.get('/api/steps')
+    assert response.status_code == 200 and response.json()['available'] is False
+    assert client.get('/api/step-probe',params={'sample_id':manifest['samples'][0]['id']}).status_code==400
+    for cache in [server.context,server.checkpoint,server.fixed_activation_scale,server.step_timeline,
+                  server.step_checkpoint,server.step_activation_scale]:
+        cache.cache_clear()

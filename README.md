@@ -112,3 +112,22 @@ Chromium installed, run `python tests/browser_smoke.py` for a headless browser
 regression on the real in-process FastAPI results (no live HTTP required).
 See [docs/VISUALIZATION-SYSTEM.md](docs/VISUALIZATION-SYSTEM.md) for the
 color-scale scope, API semantics and scientific limitations.
+
+## V0.3 — Step-level Learning Observatory
+
+See all actual minibatch updates, not just Epoch snapshots. The new **See every update** section includes a per-Step Loss / preclip Gradient / postupdate Weight-Δ chart, an event scrubber for every optimizer step, and a distinct saved-checkpoint scrubber for the snapshots that really exist. Lock the image, layer, channel and target class to compare two trained states. View common-scale activations, signed B−A, filter-weight changes, fixed-class prediction changes and exact GAP+Linear per-channel contributions. Jump straight to the channels whose spatial activations changed the most.
+
+```bash
+python -m cnnviz.train --dataset digits --epochs 10 --step-interval 4
+uvicorn cnnviz.server:app --host 127.0.0.1 --port 8000
+```
+
+- The trainer emits `artifacts/demo/steps.json` with **every** optimizer step event; `step_XXXXXX.pt` is emitted only for saved steps and epoch ends.
+- `/api/steps` provides all training events, including per-layer gradient norms and actual optimizer parameter deltas; `/api/step-probe` evaluates two **real** saved checkpoints on the same held-out image.
+- Selecting an unsaved event updates the optimization metrics only, **not** the Step A/B model maps. The page explains the distinction prominently.
+- Older Epoch-only artifacts still work; the Step area reports how to enable recording.
+- `--step-interval 1` records every model state (at higher storage cost), or `--no-step-records` turns step recording off entirely.
+- Caution: model snapshots do not include the Adam optimizer state; timeline replay is inference only, not resumable training.
+
+Run `pytest -q` and `node --check web/app.js`. For optional offline Chromium smoke tests: `CNNVIZ_ARTIFACTS=$PWD/artifacts/demo python tests/browser_smoke.py`.
+For numerical/visualization definitions see [docs/VISUALIZATION-SYSTEM.md](docs/VISUALIZATION-SYSTEM.md).

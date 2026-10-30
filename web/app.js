@@ -26,7 +26,7 @@ async function api(path,opts){const res=await fetch(path,opts);let obj;try{obj=a
 function setText(q,value){const el=$(q);if(el)el.textContent=value}
 function createNode(type,cl){const x=document.createElement(type);if(cl)x.className=cl;return x}
 function cancelRequest(key){state.controllers[key]?.abort();const controller=new AbortController();state.controllers[key]=controller;return controller.signal}
-function abandonRequests(){for(const key of ['trajectory','inspect','channel','compare'])cancelRequest(key);state.requestId++;state.compareRevision++;}
+function abandonRequests(){for(const key of ['trajectory','inspect','channel','compare','step'])cancelRequest(key);state.requestId++;state.compareRevision++;stepView.generation++;}
 function isAbort(error){return error?.name==='AbortError'}
 function clearComparisonDisplay(){
   for(const name of ['#compare-a-image','#compare-b-image','#compare-diff-image'])$(name).removeAttribute('src');
@@ -64,7 +64,7 @@ function renderCompareControls(){
 function setTargetClass(value){
   state.targetClass=Number(value);$('#target-class').value=state.targetClass;
   setText('#target-note',`锁定类别「${state.manifest.classes[state.targetClass]}」；真实预测独立展示。`);
-  renderTrajectory();updateInsight();loadInspect();
+  renderTrajectory();updateInsight();loadInspect();loadStepProbe();
 }
 function changeScaleMode(value){
   state.scaleMode=value;setText('#feature-scale-label',value==='fixed'?'固定：[0, 同一样本/层所有 Epoch 与通道的最大值]':'Local：每张图单独拉伸，颜色不可用于跨 Epoch 比较');
@@ -249,18 +249,18 @@ function renderChannelJourney(){
 function invalidateChannel(){
   cancelRequest('inspect');cancelRequest('channel');cancelRequest('compare');
   state.requestId++;state.compareRevision++;state.channelJourneyKey=null;
-  state.channelJourney=null;state.compareInfo=null;state.compareKey=null;clearComparisonDisplay();
+  state.channelJourney=null;state.compareInfo=null;state.compareKey=null;clearComparisonDisplay();cancelRequest('step');stepView.generation++;
 }
 function selectChannel(channel){
   if(channel===state.channel)return;
-  invalidateChannel();state.channel=channel;loadInspect();loadCompare();
+  invalidateChannel();state.channel=channel;loadInspect();loadCompare();loadStepProbe();
 }
 function chooseLayer(layer){
   if(layer===state.layer)return;
   invalidateChannel();state.layer=layer;state.channel=0;
   $$('.layer-button').forEach(b=>b.classList.toggle('selected',Number(b.dataset.layer)===layer));
   setText('#feature-explanation',layerText[layer][1]);setText('#interpretation-title',layerText[layer][2]);setText('#interpretation-text',layerText[layer][3]);
-  loadInspect();loadCompare();
+  loadInspect();loadCompare();loadStepProbe();
 }
 function changeCompareEpoch(side,value){
   const number=Number(value);if(side==='a')state.epochA=number;else state.epochB=number;
@@ -320,6 +320,146 @@ function bindEvents(){
   zone.addEventListener('drop',e=>{e.preventDefault();zone.classList.remove('dragover');uploadImage(e.dataTransfer?.files[0])});
   window.addEventListener('keydown',e=>{if(e.target.matches('input,button,textarea'))return;if(e.key==='ArrowRight'&&state.manifest){stopPlayback();updateEpoch(state.epoch+1)}if(e.key==='ArrowLeft'&&state.manifest){stopPlayback();updateEpoch(state.epoch-1)}})
 }
-async function boot(){bindEvents();try{const meta=await api('/api/manifest');showManifest(meta);updateEpoch(0);await selectSample(meta.samples[0])}
+// V0.3: every point is a REAL optimizer-step event; only persisted steps are replayable.
+const stepView = {timeline:null, snapshots:[], indexB:0, stepA:0, metric:'loss_before_update',
+  generation:0, timer:null, sampleId:null, eventStep:0};
+const stepMetricLabels = {
+  loss_before_update:'Batch loss · before update',
+  gradient_norm_preclip:'Gradient norm · before clipping',
+  weight_delta_post_step:'Actual parameter L2 update'
+};
+function stopStepPlay(){if(stepView.timer)clearInterval(stepView.timer);stepView.timer=null;setText('#step-play','▶ Play snapshots')}
+async function loadSteps(){
+  try{
+    const data=await api('/api/steps');stepView.timeline=data;
+    if(!data.available||!data.snapshots.length){setText('#step-availability','当前演示尚无 Step 记录。执行 python -m cnnviz.train --epochs 10 --step-interval 4 后刷新。');return}
+    stepView.snapshots=data.snapshots;
+    stepView.indexB=stepView.snapshots.length-1;stepView.stepA=0;
+    stepView.eventStep=data.events.length;
+    $('#step-event-slider').max=data.events.length;
+    $('#step-event-slider').value=stepView.eventStep;
+    $('#step-b').max=stepView.indexB;
+    const sel=$('#step-a');sel.replaceChildren();
+    for(const snap of stepView.snapshots){const option=createNode('option');option.value=snap.step;option.textContent=`Step ${String(snap.step).padStart(3,'0')} · E${snap.epoch}`;sel.append(option)}
+    sel.value='0';
+    setText('#step-total',String(data.events.length));
+    setText('#step-snapshot-count',`${data.snapshots.length} saved snapshots`);
+    setText('#step-end-label',`GLOBAL STEP ${data.events.length}`);
+    setText('#step-availability',`每步事件完整记录；仅 ${data.snapshots.length} 个实际保存的权重可回放。所有特征来自同一张固定的验证图片。`);
+    renderStepControls();renderStepChart();loadStepProbe();
+  }catch(e){setText('#step-availability','无法读取 Step 事件：'+e.message)}
+}
+function stepSelected(){return stepView.snapshots[stepView.indexB]}
+function stepRecord(n){return stepView.timeline?.events.find(x=>x.step===n)||null}
+function renderStepControls(){
+  const snap=stepSelected();if(!snap)return;
+  $('#step-b').value=stepView.indexB;
+  setText('#step-current-label',`STEP ${String(snap.step).padStart(3,'0')} / EPOCH ${snap.epoch} · BATCH ${snap.batch}`);
+  setText('#step-a-caption',`STEP ${stepView.stepA}`);
+  setText('#step-b-caption',`STEP ${snap.step}`);
+  renderStepEvent();
+}
+function renderStepChart(){
+  const data=stepView.timeline?.events;if(!data?.length)return;
+  setText('#step-chart-name',stepMetricLabels[stepView.metric]);
+  const w=900,h=185,padL=44,padR=18,padT=21,padB=33;
+  const values=data.map(r=>Number(r[stepView.metric]));
+  const lo=Math.min(0,...values),hi=Math.max(...values,1e-8),span=Math.max(hi-lo,1e-9);
+  const x=(step)=>padL+(step-1)/Math.max(data.length-1,1)*(w-padL-padR);
+  const y=(v)=>h-padB-(v-lo)/span*(h-padT-padB);
+  const path=data.map((e,i)=>`${i===0?'M':'L'}${x(e.step).toFixed(2)} ${y(values[i]).toFixed(2)}`).join(' ');
+  const index=stepView.eventStep||stepSelected()?.step||0;
+  const checkpointMarks=stepView.snapshots.filter(s=>s.step>0).map(s=>
+    `<line x1="${x(s.step).toFixed(2)}" y1="${h-padB}" x2="${x(s.step).toFixed(2)}" y2="${h-padB+5}" stroke="#7c8de4" stroke-width="2"/>`).join('');
+  const cursor=index>0?`<line x1="${x(index)}" y1="${padT}" x2="${x(index)}" y2="${h-padB}" stroke="#e9a3ab" stroke-width="1.5" stroke-dasharray="5 5"/><circle cx="${x(index)}" cy="${y(values[index-1])}" r="5" fill="#fff" stroke="#d77794" stroke-width="3"/>`:'';
+  $('#step-chart').innerHTML=`<line x1="${padL}" y1="${h-padB}" x2="${w-padR}" y2="${h-padB}" stroke="#dde4f2"/><line x1="${padL}" y1="${padT}" x2="${padL}" y2="${h-padB}" stroke="#dde4f2"/><text x="${padL-8}" y="${padT+4}" fill="#8a99b1" font-size="12" text-anchor="end">${hi.toFixed(3)}</text><text x="${padL-8}" y="${h-padB+3}" fill="#8a99b1" font-size="12" text-anchor="end">${lo.toFixed(3)}</text><text x="${padL}" y="${h-8}" fill="#9ba8bc" font-size="11">STEP 1</text><text x="${w-padR}" y="${h-8}" fill="#9ba8bc" font-size="11" text-anchor="end">STEP ${data.length}</text><path d="${path}" fill="none" stroke="#7b8be4" stroke-width="2.7" stroke-linecap="round" stroke-linejoin="round"/>${checkpointMarks}${cursor}`;
+}
+function chooseStepB(index){
+  if(!stepView.snapshots.length)return;
+  stepView.indexB=Math.max(0,Math.min(stepView.snapshots.length-1,index));
+  stepView.eventStep=stepSelected().step||1;
+  renderStepControls();renderStepChart();loadStepProbe();
+}
+function renderLayerBars(containerId,values,suffixClass){
+  const container=$(containerId);container.replaceChildren();if(!values)return;
+  const max=Math.max(1e-10,...Object.values(values).map(Number));
+  for(const name of ['conv1','conv2','conv3','fc']){
+    const value=Number(values[name]??0),row=createNode('div','step-layer-bar');
+    const lbl=createNode('span');lbl.textContent=name;
+    const track=createNode('div');const fill=createNode('i',suffixClass);
+    fill.style.width=`${value/max*100}%`;track.append(fill);
+    const number=createNode('b');number.textContent=fmt(value,3);row.append(lbl,track,number);container.append(row);
+  }
+}
+function renderStepEvent(){
+  const step=stepView.eventStep,row=stepRecord(step);
+  if(!row){setText('#step-event-label','STEP 0 · UNTRAINED');setText('#step-event-info','随机初始化，无训练 Batch、梯度或参数更新。');for(const n of ['#step-loss','#step-grad','#step-weight'])setText(n,'—');$('#step-grad-layers').replaceChildren();$('#step-update-layers').replaceChildren();return;}
+  $('#step-event-slider').value=step;
+  setText('#step-event-label',`STEP ${step} · EPOCH ${row.epoch} / BATCH ${row.batch}`);
+  const saved=row.has_checkpoint,selected=stepSelected()?.step;
+  setText('#step-event-info',`此步骤 ${saved?'有':'没有'}独立模型快照；当前 A/B 显示的模型为 Step ${stepView.stepA} 与 Step ${selected}。Loss/Gradient 来自训练 Batch，而可视化来自固定的探针图片。${row.gradient_clipped?'这一步发生了梯度裁剪。':'这一步没有触发梯度裁剪。'}`);
+  setText('#step-loss',fmt(row.loss_before_update,4));
+  setText('#step-grad',fmt(row.gradient_norm_preclip,4));
+  setText('#step-weight',fmt(row.weight_delta_post_step,5));
+  renderLayerBars('#step-grad-layers',row.gradient_norm_layers_preclip,'');
+  renderLayerBars('#step-update-layers',row.weight_delta_layers,'update');
+}
+function clearStepProbe(){
+  for(const id of ['#step-image-a','#step-image-b','#step-image-difference','#step-kernel-difference'])$(id).removeAttribute('src');
+  setText('#step-prob-delta','…');setText('#step-rms','…');setText('#step-kernel-norm','…');$('#step-channel-suggestions').replaceChildren();
+  setText('#step-learning-title','Computing real checkpoint differences…');$('#step-contributions').replaceChildren();
+}
+async function loadStepProbe(){
+  if(!stepView.timeline?.available||!state.sample||state.targetClass===null)return;
+  const request=++stepView.generation;
+  const id=state.sample.id,layer=state.layer,channel=state.channel,target=state.targetClass;
+  const a=stepView.stepA,b=stepSelected()?.step;
+  if(b===undefined)return;
+  const signal=cancelRequest('step');clearStepProbe();
+  try{
+    const data=await api(`/api/step-probe?sample_id=${encodeURIComponent(id)}&step_a=${a}&step_b=${b}&layer=${layer}&channel=${channel}&target_class=${target}`,{signal});
+    if(request!==stepView.generation||id!==state.sample?.id||layer!==state.layer||channel!==state.channel||target!==state.targetClass||b!==stepSelected()?.step)return;
+    $('#step-image-a').src=data.a;$('#step-image-b').src=data.b;
+    $('#step-image-difference').src=data.difference;$('#step-kernel-difference').src=data.filter_delta;
+    setText('#step-rms',`Activation RMS Δ ${fmt(data.rms_difference,5)}`);
+    setText('#step-kernel-norm',`Kernel L2 Δ ${fmt(data.kernel_delta_l2,5)}`);
+    setText('#step-prob-delta',(data.probability_delta>=0?'+':'')+pct(data.probability_delta,2));
+    setText('#step-learning-title',`STEP ${a} → ${b} · Conv${layer} / CH ${channel}`);
+    const cls=state.manifest.classes[target];
+    setText('#step-learning-note',`目标类别「${cls}」概率 ${pct(data.probability_a,2)} → ${pct(data.probability_b,2)}（变化 ${(data.probability_delta>=0?'+':'')+pct(data.probability_delta,2)}）。实际预测 ${state.manifest.classes[data.predicted_a]} → ${state.manifest.classes[data.predicted_b]}。当前选择的训练 Batch 与这张验证图片不是同一样本；差异仅反映模型参数更新后的行为。`);
+    setText('#step-scale-info',`固定色标 [${fmt(data.scale.low,3)}, ${fmt(data.scale.high,3)}] 跨所有保存的 Step/通道；B−A 差分固定 ±${fmt(data.difference_scale.high,3)}。Kernel Δ 独立做有符号显示。`);
+    const suggestion=$('#step-channel-suggestions');suggestion.replaceChildren();
+    for(const item of data.top_changing_channels){
+      const btn=createNode('button',item.channel===channel?'active':'');
+      btn.textContent=`CH ${String(item.channel).padStart(2,'0')} · RMS ${fmt(item.activation_rms_difference,3)}`;
+      btn.setAttribute('aria-label',`检查 Conv${layer} 通道 ${item.channel} 的最大激活变化`);
+      btn.addEventListener('click',()=>selectChannel(item.channel));suggestion.append(btn);
+    }
+    const container=$('#step-contributions');container.replaceChildren();
+    const values=data.class_contributions,max=Math.max(1e-8,...values.map(v=>Math.abs(v.b)));
+    for(const v of values){
+      const row=createNode('div','step-contribution');const lbl=createNode('span');lbl.textContent=`CH ${String(v.channel).padStart(2,'0')}`;
+      const bar=createNode('div');const line=createNode('i',v.b<0?'negative':'');line.style.width=`${Math.abs(v.b)/max*100}%`;bar.append(line);
+      const value=createNode('b');value.textContent=(v.b>=0?'+':'')+fmt(v.b,3);row.append(lbl,bar,value);container.append(row);
+    }
+  }catch(e){if(!isAbort(e)&&request===stepView.generation){setText('#step-learning-title','Step probe unavailable');setText('#step-learning-note',e.message)}}
+}
+function bindStepControls(){
+  $('#step-event-slider').addEventListener('input',e=>{stepView.eventStep=Number(e.target.value);renderStepEvent();renderStepChart()});
+  $('#step-a').addEventListener('change',e=>{stepView.stepA=Number(e.target.value);renderStepControls();loadStepProbe()});
+  $('#step-b').addEventListener('input',e=>{stopStepPlay();chooseStepB(Number(e.target.value))});
+  $('#step-prev').addEventListener('click',()=>{stopStepPlay();chooseStepB(stepView.indexB-1)});
+  $('#step-next').addEventListener('click',()=>{stopStepPlay();chooseStepB(stepView.indexB+1)});
+  $('#step-play').addEventListener('click',()=>{
+    if(stepView.timer){stopStepPlay();return}
+    if(!stepView.snapshots.length)return;
+    if(stepView.indexB===stepView.snapshots.length-1)chooseStepB(0);
+    setText('#step-play','Ⅱ Pause');
+    stepView.timer=setInterval(()=>{if(stepView.indexB>=stepView.snapshots.length-1){stopStepPlay();return}chooseStepB(stepView.indexB+1)},850);
+  });
+  $$('.step-metric').forEach(b=>b.addEventListener('click',()=>{stepView.metric=b.dataset.stepMetric;$$('.step-metric').forEach(item=>item.classList.toggle('selected',item===b));renderStepChart()}));
+}
+
+async function boot(){bindEvents();bindStepControls();try{const meta=await api('/api/manifest');showManifest(meta);updateEpoch(0);await selectSample(meta.samples[0]);await loadSteps()}
   catch(e){notify('启动模型失败：'+e.message+'。请先执行 python -m cnnviz.train --epochs 10');setText('#run-title','No training checkpoints found');setText('#epoch-insight','先运行训练脚本生成可检验的真实模型快照，然后刷新网页。')}}
 boot();
