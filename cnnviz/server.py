@@ -515,3 +515,47 @@ def dynamics_stylesheet():
 @app.get('/dynamics.js')
 def dynamics_javascript():
     return FileResponse(ROOT/'web'/'dynamics.js',media_type='text/javascript')
+
+# V0.5 is intentionally a read-only exploration API. Training is CLI-only.
+from . import concepts as concept_lab
+
+@app.get('/api/concepts/topk')
+def concepts_topk(run_id: str,step: int=Query(...,ge=0),layer: int=Query(5,ge=1,le=5),
+                  channel: int=Query(0,ge=0),k: int=Query(8,ge=1,le=16)):
+    try:
+        return concept_lab.rank_concepts(run_id,step,layer,channel,k)
+    except (ValueError,RuntimeError,OSError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+@app.get('/api/concepts/compare')
+def concepts_compare(run_a: str,run_b: str,step_a: int=Query(...,ge=0),step_b: int=Query(...,ge=0),
+                     layer: int=Query(5,ge=1,le=5),bootstrap: int=Query(60,ge=10,le=200)):
+    try:
+        return concept_lab.compare_runs(run_a,run_b,step_a,step_b,layer,bootstrap)
+    except (ValueError,RuntimeError,OSError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+@app.get('/api/concepts/faithfulness')
+def concepts_faithfulness(run_id: str,step: int=Query(...,ge=0),sample_index: int=Query(0,ge=0),
+                          target_class: int=Query(0,ge=0),grid: int=Query(4,ge=4,le=8)):
+    try:
+        return concept_lab.faithfulness(run_id,step,sample_index,target_class,grid=grid)
+    except (ValueError,RuntimeError,OSError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc
+
+@app.get('/concepts.js')
+def concepts_javascript():
+    return FileResponse(ROOT/'web'/'concepts.js',media_type='text/javascript')
+
+@app.get('/concepts.css')
+def concepts_stylesheet():
+    return FileResponse(ROOT/'web'/'concepts.css',media_type='text/css')
+
+@app.get('/api/concepts/matched-examples')
+def concepts_matched_examples(run_a: str,run_b: str,step_a: int=Query(...,ge=0),step_b: int=Query(...,ge=0),
+                       layer: int=Query(5,ge=1,le=5),channel_a: int=Query(...,ge=0),
+                       channel_b: int=Query(...,ge=0),k: int=Query(6,ge=1,le=16)):
+    try:
+        return concept_lab.matched_examples(run_a,run_b,step_a,step_b,layer,channel_a,channel_b,k)
+    except (ValueError,RuntimeError,OSError) as exc:
+        raise HTTPException(status_code=400,detail=str(exc)) from exc

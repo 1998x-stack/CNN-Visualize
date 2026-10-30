@@ -9,6 +9,8 @@
   <script src="/app.js" defer></script>
   <link rel="stylesheet" href="/dynamics.css" />
   <script src="/dynamics.js" defer></script>
+  <link rel="stylesheet" href="/concepts.css" />
+  <script src="/concepts.js" defer></script>
 </head>
 <body>
   <div class="ambient ambient-one" aria-hidden="true"></div><div class="ambient ambient-two" aria-hidden="true"></div>
@@ -17,12 +19,12 @@
       <span class="symbol"><span></span><span></span><span></span></span>
       <span>CNN<span class="identity-light"> / VISUALIZE</span></span>
     </a>
-    <div class="toplinks"><a href="#journey">学习历程</a><a href="#steps">Step 显微镜</a><a href="#layers">神经网络内部</a><a href="#dynamics">Neural Dynamics</a><a href="#science">研究说明</a></div>
+    <div class="toplinks"><a href="#journey">学习历程</a><a href="#steps">Step 显微镜</a><a href="#layers">神经网络内部</a><a href="#dynamics">Neural Dynamics</a><a href="#concepts">Concept Discovery</a><a href="#science">研究说明</a></div>
     <div class="header-right"><span class="status"><i></i> MODEL CONNECTED</span><a class="header-github" href="https://github.com/1998x-stack/CNN-Visualize" target="_blank" rel="noopener noreferrer">GitHub <span aria-hidden="true">↗</span></a></div>
   </header>
   <main class="page">
     <section class="hero">
-      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.4.0</span></div>
+      <div class="hero-copy"><div class="eyebrow"><span class="eyebrow-line"></span> INTERACTIVE MACHINE LEARNING LAB <span class="version">V 0.5.0</span></div>
         <h1>Watch intelligence<br /><span>take shape.</span></h1>
         <p>打开神经网络的黑箱。选择一张图像，穿越训练时间，观察模型如何从随机猜测，逐渐学会识别世界。</p>
         <div class="hero-pills"><span>◈ 真实训练检查点</span><span>◌ 逐层特征演化</span><span>⌁ 可解释性实验</span></div>
@@ -168,6 +170,39 @@
         <div class="dyn-snapshot-grid"><div class="dyn-panel dyn-histogram-panel"><div class="dyn-panel-heading"><span>02 / PARAMETER LANDSCAPE</span><strong>Weight distribution</strong></div><svg id="dyn-weight-hist" viewBox="0 0 480 160" preserveAspectRatio="none" role="img" aria-label="卷积核权重直方图"></svg><div class="dyn-metric-row"><span>WEIGHT L2 <b id="dyn-weight-norm">—</b></span><span>GRAD L2 <b id="dyn-grad-norm">—</b></span><span>UPDATE L2 <b id="dyn-update-norm">—</b></span></div><div class="dyn-panel-heading dyn-second-heading"><span>GRADIENT DISTRIBUTION · PRE-CLIP</span></div><svg id="dyn-grad-hist" viewBox="0 0 480 115" preserveAspectRatio="none" role="img" aria-label="梯度分布直方图"></svg><p class="dyn-footnote">训练 Batch 的梯度是优化前的值；下方表征来自固定留出集，不混用样本来源。</p></div>
         <div class="dyn-panel"><div class="dyn-panel-heading"><span>03 / NEURON RESPONSE FAMILIES</span><strong>Response clustering</strong></div><div id="dyn-cluster-counts" class="dyn-cluster-counts"></div><div id="dyn-cluster-channels" class="dyn-cluster-channels" role="group" aria-label="神经元响应聚类"></div><div class="dyn-response-title">SELECTED NEURON · RESPONSE BY CLASS <span id="dyn-channel-label">CH 00</span></div><svg id="dyn-class-response" viewBox="0 0 480 155" preserveAspectRatio="none" role="img" aria-label="各类别平均通道响应"></svg><p class="dyn-footnote">按同一留出集上各通道的响应向量聚类；类别簇编号并不是跨 Epoch 固定的神经元语义。</p></div></div>
         <div class="dyn-bottom dyn-panel"><div class="dyn-panel-heading"><span>04 / THE SAME IMAGE · TWO NETWORK STATES</span><strong>Feature evolution microscope</strong></div><div class="dyn-select-row"><label>A · REFERENCE<select id="dyn-step-a"></select></label><label>B · OBSERVED<select id="dyn-step-b"></select></label><label>HELD-OUT SAMPLE<input type="range" id="dyn-sample" min="0" max="39" value="0"/><span id="dyn-sample-label">00</span></label></div><div class="dyn-frames"><figure><span>INPUT / HELD-OUT</span><img id="dyn-input" alt="真实输入图片"/></figure><figure><span>STEP A</span><img id="dyn-image-a" alt="A 步骤特征激活"/></figure><figure><span>STEP B</span><img id="dyn-image-b" alt="B 步骤特征激活"/></figure><figure><span>SIGNED DIFFERENCE</span><img id="dyn-image-diff" alt="B-A 带符号激活差异"/></figure></div><div class="dyn-results"><div>REPRESENTATION CKA<strong id="dyn-pair-cka">—</strong></div><div>ACTIVATION RMS Δ<strong id="dyn-pair-rms">—</strong></div><div>TRUE-CLASS PROBABILITY Δ<strong id="dyn-prob">—</strong></div><div>MODEL PREDICTION<strong id="dyn-pred">—</strong></div></div><p id="dyn-explanation" class="dyn-footnote">所有图像使用同一幅值标尺；没有保存权重的训练事件不参与对照。</p></div>
+      </div>
+    </section>
+
+    <section id="concepts" class="cx-section" aria-label="Representation and Concept Discovery">
+      <div class="cx-intro"><div class="cx-eyebrow">RESEARCH LAB / V0.5 · MEASURABLE CONCEPTS</div><h2>What did it <em>learn?</em></h2>
+        <p>固定留出集中的真实图像，检查哪个通道被哪些样本激活；再让两组模型接受相同的探针，验证表示是否一致、可解释性是否经得住遮挡测试。</p></div>
+      <div class="cx-surface">
+        <div class="cx-toolbar">
+          <label>PRIMARY RUN<select id="cx-run" aria-label="概念实验运行"></select></label>
+          <label>STEP<select id="cx-step" aria-label="概念实验 Step"></select></label>
+          <label>LAYER<select id="cx-layer" aria-label="概念实验 Layer"><option value="1">Conv 01</option><option value="2">Conv 02</option><option value="3">Conv 03</option><option value="4">Conv 04</option><option value="5" selected>Conv 05</option></select></label>
+          <label>CHANNEL<select id="cx-channel" aria-label="概念实验 Channel"></select></label>
+        </div>
+        <p id="cx-status" role="status" aria-live="polite" class="cx-status">Loading recorded experiments…</p>
+        <article class="cx-panel">
+          <div class="cx-heading"><div><span>01 / TOP ACTIVATIONS · HELD-OUT PROBES</span><h3>A channel’s <em>favorite examples.</em></h3><p>按所选通道最大空间激活排序；所有小图使用同一绝对色标。</p></div><div class="cx-kpi"><strong id="cx-purity">—</strong><small>Top-k label share</small></div></div>
+          <div id="cx-gallery" class="cx-gallery" aria-label="通道最强响应图像集"></div>
+          <div id="cx-gallery-note" class="cx-note">排序结果不是由人工标注的语义概念。</div>
+        </article>
+        <div class="cx-two">
+          <article class="cx-panel"><div class="cx-heading"><div><span>02 / ALIGNED REPRESENTATIONS</span><h3>Same stimuli. <em>Different networks.</em></h3><p>共用留出集才允许计算；输出 Bootstrap CKA 和通道匹配。</p></div></div>
+            <div class="cx-compare-controls"><label>COMPARE RUN<select id="cx-other"></select></label><label>COMPARE STEP<select id="cx-other-step"></select></label><button id="cx-compare" type="button">Compare representations</button></div>
+            <div class="cx-metrics"><div><span>LINEAR CKA</span><strong id="cx-cka">—</strong></div><div><span>95% BOOTSTRAP CI</span><strong id="cx-ci">—</strong></div><div><span>MATCHED MEAN ρ</span><strong id="cx-corr">—</strong></div></div>
+            <div class="cx-match-title">ONE-TO-ONE CHANNEL CORRESPONDENCE</div><div id="cx-matches" class="cx-matches"></div><div class="cx-paired"><div class="cx-match-title">TOP-k OVERLAP · MATCHED NEURONS <strong id="cx-overlap">—</strong></div><div class="cx-pair-cols"><div><span>RUN A</span><div id="cx-pair-a" class="cx-mini-gallery"></div></div><div><span>RUN B</span><div id="cx-pair-b" class="cx-mini-gallery"></div></div></div></div>
+            <p class="cx-note">Pearson 相关和 CKA 不证明神经元具有相同语义；区间只对共享探针样本进行重抽样。</p>
+          </article>
+          <article class="cx-panel"><div class="cx-heading"><div><span>03 / EXPLANATION FAITHFULNESS</span><h3>Does the evidence <em>matter?</em></h3><p>按 Grad-CAM 区域遮挡，对比随机位置遮挡的目标类别概率曲线。</p></div></div>
+            <div class="cx-compare-controls"><label>PROBE SAMPLE<input id="cx-sample" type="number" value="0" min="0" max="39" /></label><label>TARGET CLASS<select id="cx-target"></select></label><button id="cx-test" type="button">Run occlusion test</button></div>
+            <svg id="cx-deletion-chart" viewBox="0 0 440 180" role="img" aria-label="Grad-CAM 顺序遮挡与随机遮挡概率曲线"></svg>
+            <div class="cx-metrics"><div><span>CAM DELETION AUC</span><strong id="cx-del-auc">—</strong></div><div><span>RANDOM AUC</span><strong id="cx-random-auc">—</strong></div><div><span>RANDOM − CAM</span><strong id="cx-auc-gap">—</strong></div></div>
+            <p class="cx-note">遮挡使用零值补丁，会造成分布外输入；曲线是局部敏感性测试，不是概念的因果证明。</p>
+          </article>
+        </div>
       </div>
     </section>
     <footer id="science"><div class="footer-top"><div class="footer-mark">CV<span>·</span></div><p>Make learning visible.<br />Make explanations testable.</p><a href="#journey">BACK TO EXPERIMENT ↑</a></div><div class="footer-bottom"><span>BASED ON ZEILER & FERGUS · ECCV 2014</span><span>REAL CHECKPOINTS · OPEN RESEARCH · BUILT FOR CURIOSITY</span></div></footer>

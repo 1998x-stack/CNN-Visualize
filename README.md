@@ -5,7 +5,26 @@
 Based on [Zeiler & Fergus, *Visualizing and Understanding Convolutional Networks* (ECCV 2014)](https://arxiv.org/abs/1311.2901). This is a small, scientifically explicit reimplementation and visualization lab, not a claim to reproduce the exact original ZFNet ImageNet result.
 
 
-## V0.4 · Neural Dynamics Observatory (NEW)
+## V0.5 · Representation & Concept Discovery (NEW)
+
+V0.5 introduces a fifth-page-section **What did it learn?** with real held-out Top-k response galleries, fixed-scale feature maps, Hungarian one-to-one cross-run channel matching, aligned cross-run linear CKA with probe bootstrap intervals, matched neuron Top-k overlap, and target-class CAM deletion vs random-occlusion curves. This is scientific measurement of candidate concepts, **not automated or proven semantic labeling**.
+
+The offline demo contains three independent training seeds on **Digits** with **one identical split and 120 identical held-out probe images**, using the 5-conv `zf-small` model: 10 epochs / 160 real optimizer updates per seed, final validation accuracies 88.125%, 86.875%, 91.25% (on a small 160-image validation set). Pairwise final-layer CKA: 0.760, 0.402, 0.494. The fixed split permits meaningful per-image comparison; seed variation can still produce very different internal representations.
+
+```bash
+# Existing source clone needs real research checkpoints, unlike the offline demo ZIP.
+python -m cnnviz.train --dataset digits --epochs 10 --step-interval 4
+python -m cnnviz.multiseed --prefix v05-digits-zf --dataset digits \
+  --variant zf-small --seeds 11 22 33 --split-seed 42 \
+  --epochs 10 --train-limit 1024 --val-limit 160 --probe-count 120 --interval 16
+uvicorn cnnviz.server:app --host 127.0.0.1 --port 8000
+```
+
+An opt-in **native 32×32 CIFAR-10 multi-seed training pipeline** is available through `python -m cnnviz.multiseed --dataset cifar10 --download ...`; actual CIFAR-10 runs are **not** part of this delivery or claimed as verified. Do not confuse Digits images upscaled from 8×8 with native 32×32 data.
+
+See **[V0.5 research design, API, math, experimental setup and limitations](docs/V05-CONCEPT-DISCOVERY.md)**.
+
+## V0.4 · Neural Dynamics Observatory
 
 The existing 16×16 three-convolution Epoch/Step explorer is **unchanged**. V0.4 adds a **separate** experiment family with **five convolutional layers**, real **32×32 model inputs**, two **AlexNet/ZFNet-inspired** first-layer configurations, fixed-probe **temporal linear CKA**, layer-specific weight/gradient histograms, KMeans channel-response groupings, and a new Apple-style **Observe the unseen** interactive dashboard. These are **small educational architectures**, not the original ImageNet models.
 

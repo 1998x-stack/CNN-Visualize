@@ -39,8 +39,8 @@ def load_run(name: str) -> dict:
 def probe_data(name: str):
     meta = load_run(name)
     # CIFAR-10 explicitly requires local dataset. No implicit network downloads in GET.
-    _, val, _, _ = research_datasets(meta['dataset'], root=meta.get('data_root','data'), download=False, seed=meta['seed'])
-    val = _deterministic_subset(val, meta['config']['val_limit'], meta['seed'] + 1)
+    _, val, _, _ = research_datasets(meta['dataset'], root=meta.get('data_root','data'), download=False, seed=meta.get('split_seed',meta['seed']))
+    val = _deterministic_subset(val, meta['config']['val_limit'], meta.get('split_seed',meta['seed']) + 1)
     pairs = [val[int(i)] for i in meta['probe_indices']]
     x = torch.stack([sample[0] for sample in pairs])
     y = torch.tensor([int(sample[1]) for sample in pairs])

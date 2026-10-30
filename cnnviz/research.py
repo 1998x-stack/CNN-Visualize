@@ -95,16 +95,17 @@ def _tensor_hist(tensor, bins=20):
 
 def run_research(*, name='research-digits-zf', dataset='digits', variant='zf-small',
                  epochs=15, seed=42, train_limit=1024, val_limit=160, interval=16,
-                 root='data', download=False, out='artifacts/dynamics'):
+                 root='data', download=False, out='artifacts/dynamics', split_seed=None, probe_count=40):
     if not name or not all(c.isalnum() or c in '-_' for c in name) or len(name) > 60:
         raise ValueError('run name must be a simple slug (max 60 chars)')
-    if epochs < 1 or epochs > 100 or interval < 1 or interval > 10000:
+    if epochs < 1 or epochs > 100 or interval < 1 or interval > 10000 or not 4 <= probe_count <= 512:
         raise ValueError('Invalid epochs or interval')
     torch.set_num_threads(min(4, torch.get_num_threads()))
     random.seed(seed); np.random.seed(seed); torch.manual_seed(seed)
-    train_set, val_set, labels, provenance = research_datasets(dataset, root, download, seed)
-    train_set = _deterministic_subset(train_set, train_limit, seed)
-    val_set = _deterministic_subset(val_set, val_limit, seed + 1)
+    split_seed = seed if split_seed is None else split_seed
+    train_set, val_set, labels, provenance = research_datasets(dataset, root, download, split_seed)
+    train_set = _deterministic_subset(train_set, train_limit, split_seed)
+    val_set = _deterministic_subset(val_set, val_limit, split_seed + 1)
     channels = 1 if dataset == 'digits' else 3
     model = FiveLayerCNN(channels, len(labels), variant)
     optimizer = torch.optim.Adam(model.parameters(), lr=.003)
@@ -158,11 +159,11 @@ def run_research(*, name='research-digits-zf', dataset='digits', variant='zf-sma
         epochs_metrics.append({'epoch': ep, 'val_accuracy':correct/total,'val_loss':cumulative/total})
         print(f'{name} epoch {ep}: val_acc {correct/total:.1%}', flush=True)
     # A fixed held-out probe set shared by all checkpoints; its labels are not used for fitting.
-    probe_idx = list(range(min(40,len(val_set))))
+    probe_idx = list(range(min(probe_count,len(val_set))))
     manifest = {'schema': 1, 'run_id': name, 'dataset': dataset, 'variant': variant,
         'model_family': '5-layer AlexNet/ZFNet-inspired 32px educational CNN; NOT original ImageNet architecture',
         'channels': channels, 'classes': labels, 'seed': seed, 'epochs': epochs,
-        'train_count': len(train_set), 'validation_count': len(val_set),
+        'train_count': len(train_set), 'validation_count': len(val_set), 'split_seed': split_seed,
         'data_root': str(root),
         'environment': {'torch': torch.__version__, 'numpy': np.__version__, 'sklearn': sklearn.__version__, 'python': __import__('platform').python_version()},
         'checkpoint_sha256': {s['path']: hashlib.sha256((directory / s['path']).read_bytes()).hexdigest() for s in snapshots},
@@ -190,6 +191,8 @@ def main():
     parser.add_argument('--root',default='data')
     parser.add_argument('--download',action='store_true')
     parser.add_argument('--out',default='artifacts/dynamics')
+    parser.add_argument('--split-seed',type=int,default=None,help='Fix held-out split across different training seeds')
+    parser.add_argument('--probe-count',type=int,default=40,help='Held-out examples used for all concept analyses')
     run_research(**vars(parser.parse_args()))
 
 if __name__=='__main__':main()
